@@ -483,15 +483,32 @@ def format_email_body(subject, employee, question_rows, answers, stage, approve_
 # ============================================================================
 
 def find_response_by_id(response_id):
-    responses_df = load_responses()
-    if responses_df.empty:
+    # Clear cache to ensure fresh data
+    load_responses.clear()
+    spreadsheet = get_spreadsheet()
+    worksheet = ensure_responses_sheet(spreadsheet)
+    records = worksheet.get_all_records()
+    df = pd.DataFrame(records)
+    # Ensure all expected columns exist, even if sheet is empty
+    expected_columns = [
+        "response_id", "created_at", "updated_at", "manager_email", "manager_name",
+        "employee_id", "employee_name", "employee_email", "branch", "dept",
+        "job_title", "executive_email", "questions_score", "number_of_nos",
+        "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
+        "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
+        "status", "employee_token", "manager_token", "executive_token"
+    ]
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = ""
+    if df.empty:
         return None, None, None
-    matches = responses_df[responses_df['response_id'] == response_id]
+    matches = df[df['response_id'] == response_id]
     if matches.empty:
         return None, None, None
     row = matches.iloc[0]
     row_index = matches.index[0] + 2  # account for header row
-    return row.to_dict(), row_index, responses_df
+    return row.to_dict(), row_index, df
 
 
 def update_response(response_id, updates):
@@ -635,66 +652,74 @@ def send_stage_email(response, stage):
 
 
 def process_action(action, response_id, token):
-    response, _, _ = find_response_by_id(response_id)
-    if not response:
-        st.error("Approval record not found.")
-        return
+    try:
+        response, _, _ = find_response_by_id(response_id)
+        if not response:
+            st.error("Approval record not found. Please check that the link is correct and the record exists.")
+            st.info(f"Debug info: Looking for response_id: {response_id}")
+            return
 
-    valid = False
-    stage_email = None
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    updates = {"updated_at": now}
+        st.info(f"Found record for {response.get('employee_name', 'Unknown')} - Status: {response['status']}")
 
-    if action == 'employee_approve' and response['status'] == 'Pending Employee' and token == response.get('employee_token'):
-        valid = True
-        updates['employee_agree'] = 'Yes'
-        updates['employee_agree_ts'] = now
-        updates['status'] = 'Pending Manager'
-        stage_email = 'manager'
-    elif action == 'employee_reject' and response['status'] == 'Pending Employee' and token == response.get('employee_token'):
-        valid = True
-        updates['employee_agree'] = 'No'
-        updates['employee_agree_ts'] = now
-        updates['status'] = 'Rejected by Employee'
-        stage_email = 'rejected'
-    elif action == 'manager_approve' and response['status'] == 'Pending Manager' and token == response.get('manager_token'):
-        valid = True
-        updates['manager_agree'] = 'Yes'
-        updates['manager_agree_ts'] = now
-        updates['status'] = 'Pending Executive'
-        stage_email = 'executive'
-    elif action == 'manager_reject' and response['status'] == 'Pending Manager' and token == response.get('manager_token'):
-        valid = True
-        updates['manager_agree'] = 'No'
-        updates['manager_agree_ts'] = now
-        updates['status'] = 'Rejected by Manager'
-        stage_email = 'rejected'
-    elif action == 'executive_approve' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
-        valid = True
-        updates['executive_agree'] = 'Yes'
-        updates['executive_agree_ts'] = now
-        updates['status'] = 'Approved'
-    elif action == 'executive_reject' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
-        valid = True
-        updates['executive_agree'] = 'No'
-        updates['executive_agree_ts'] = now
-        updates['status'] = 'Rejected by Executive'
-        stage_email = 'rejected'
+        valid = False
+        stage_email = None
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        updates = {"updated_at": now}
 
-    if not valid:
-        st.error("This approval link is invalid or the action is not allowed.")
-        return
+        if action == 'employee_approve' and response['status'] == 'Pending Employee' and token == response.get('employee_token'):
+            valid = True
+            updates['employee_agree'] = 'Yes'
+            updates['employee_agree_ts'] = now
+            updates['status'] = 'Pending Manager'
+            stage_email = 'manager'
+        elif action == 'employee_reject' and response['status'] == 'Pending Employee' and token == response.get('employee_token'):
+            valid = True
+            updates['employee_agree'] = 'No'
+            updates['employee_agree_ts'] = now
+            updates['status'] = 'Rejected by Employee'
+            stage_email = 'rejected'
+        elif action == 'manager_approve' and response['status'] == 'Pending Manager' and token == response.get('manager_token'):
+            valid = True
+            updates['manager_agree'] = 'Yes'
+            updates['manager_agree_ts'] = now
+            updates['status'] = 'Pending Executive'
+            stage_email = 'executive'
+        elif action == 'manager_reject' and response['status'] == 'Pending Manager' and token == response.get('manager_token'):
+            valid = True
+            updates['manager_agree'] = 'No'
+            updates['manager_agree_ts'] = now
+            updates['status'] = 'Rejected by Manager'
+            stage_email = 'rejected'
+        elif action == 'executive_approve' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
+            valid = True
+            updates['executive_agree'] = 'Yes'
+            updates['executive_agree_ts'] = now
+            updates['status'] = 'Approved'
+        elif action == 'executive_reject' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
+            valid = True
+            updates['executive_agree'] = 'No'
+            updates['executive_agree_ts'] = now
+            updates['status'] = 'Rejected by Executive'
+            stage_email = 'rejected'
 
-    if update_response(response_id, updates):
-        st.success("Thank you. The scorecard status has been updated.")
-        if stage_email:
-            sent, recipient, body = send_stage_email({**response, **updates}, stage_email)
-            if sent:
-                st.info(f"Notification email sent to {recipient}.")
-            else:
-                st.info("Email could not be sent. Please use the app URL or email preview instead.")
-    else:
-        st.error("Unable to update the response record.")
+        if not valid:
+            st.error("This approval link is invalid or the action is not allowed.")
+            st.info(f"Action: {action}, Status: {response['status']}, Token match: {token == response.get(f'{action.split(\"_\")[0]}_token')}")
+            return
+
+        if update_response(response_id, updates):
+            st.success("Thank you. The scorecard status has been updated.")
+            if stage_email:
+                sent, recipient, body = send_stage_email({**response, **updates}, stage_email)
+                if sent:
+                    st.info(f"Notification email sent to {recipient}.")
+                else:
+                    st.info("Email could not be sent. Please use the app URL or email preview instead.")
+        else:
+            st.error("Unable to update the response record.")
+    except Exception as e:
+        st.error(f"An error occurred while processing the approval: {e}")
+        st.info("Please try again or contact support if the issue persists.")
 
 # ============================================================================
 # MAIN UI
@@ -716,6 +741,30 @@ query_params = st.query_params
 action = query_params.get('action', [None])[0]
 response_id = query_params.get('response_id', [None])[0]
 token = query_params.get('token', [None])[0]
+debug = query_params.get('debug', [None])[0]
+
+# Debug endpoint
+if debug == 'connection':
+    st.title("🔍 Connection Debug")
+    try:
+        spreadsheet = get_spreadsheet()
+        st.success("✅ Google Sheets connection successful")
+        worksheets = spreadsheet.worksheets()
+        st.info(f"Found {len(worksheets)} worksheets: {[ws.title for ws in worksheets]}")
+
+        # Test responses sheet
+        try:
+            responses_df = load_responses()
+            st.success(f"✅ Responses sheet loaded: {len(responses_df)} records")
+            if not responses_df.empty:
+                st.info(f"Latest record: {responses_df.iloc[-1]['response_id']} - {responses_df.iloc[-1]['status']}")
+        except Exception as e:
+            st.error(f"❌ Error loading responses: {e}")
+
+    except Exception as e:
+        st.error(f"❌ Google Sheets connection failed: {e}")
+        st.info("Check your secrets configuration in Streamlit Cloud")
+    st.stop()
 
 if action and response_id and token:
     st.info("Processing approval link...")
@@ -914,14 +963,14 @@ with tab_status:
             manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
             for _, row in manager_responses.iterrows():
                 status_indicator = {
-                    'Pending Employee': '[PENDING EMPLOYEE]',
-                    'Pending Manager': '[PENDING MANAGER]',
-                    'Pending Executive': '[PENDING EXECUTIVE]',
-                    'Approved': '[APPROVED]',
-                    'Rejected by Employee': '[REJECTED BY EMPLOYEE]',
-                    'Rejected by Manager': '[REJECTED BY MANAGER]',
-                    'Rejected by Executive': '[REJECTED BY EXECUTIVE]'
-                }.get(row['status'], '[UNKNOWN]')
+                    'Pending Employee': '[EMP]',
+                    'Pending Manager': '[MGR]',
+                    'Pending Executive': '[EXEC]',
+                    'Approved': '[OK]',
+                    'Rejected by Employee': '[EMP NO]',
+                    'Rejected by Manager': '[MGR NO]',
+                    'Rejected by Executive': '[EXEC NO]'
+                }.get(row['status'], '[?]')
 
                 with st.expander(f"{status_indicator} {row['employee_name']} — {row['status']}"):
                     # Create a cleaner layout with columns
@@ -936,17 +985,17 @@ with tab_status:
 
                     with col2:
                         st.markdown("**👥 Approval Status:**")
-                        emp_status = "[YES]" if row['employee_agree'] == 'Yes' else "[NO]" if row['employee_agree'] == 'No' else "[PENDING]"
+                        emp_status = "[YES]" if row['employee_agree'] == 'Yes' else "[NO]" if row['employee_agree'] == 'No' else "[WAIT]"
                         st.write(f"• **Employee:** {emp_status}")
                         if row['employee_agree_ts']:
                             st.write(f"  _{row['employee_agree_ts']}_")
 
-                        mgr_status = "[YES]" if row['manager_agree'] == 'Yes' else "[NO]" if row['manager_agree'] == 'No' else "[PENDING]"
+                        mgr_status = "[YES]" if row['manager_agree'] == 'Yes' else "[NO]" if row['manager_agree'] == 'No' else "[WAIT]"
                         st.write(f"• **Manager:** {mgr_status}")
                         if row['manager_agree_ts']:
                             st.write(f"  _{row['manager_agree_ts']}_")
 
-                        exec_status = "[YES]" if row['executive_agree'] == 'Yes' else "[NO]" if row['executive_agree'] == 'No' else "[PENDING]"
+                        exec_status = "[YES]" if row['executive_agree'] == 'Yes' else "[NO]" if row['executive_agree'] == 'No' else "[WAIT]"
                         st.write(f"• **Executive:** {exec_status}")
                         if row['executive_agree_ts']:
                             st.write(f"  _{row['executive_agree_ts']}_")
