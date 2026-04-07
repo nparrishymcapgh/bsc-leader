@@ -513,16 +513,30 @@ def find_response_by_id(response_id):
 
 def update_response(response_id, updates):
     spreadsheet = get_spreadsheet()
-    responses_df = load_responses()
-    if responses_df.empty:
+    worksheet = ensure_responses_sheet(spreadsheet)
+    records = worksheet.get_all_records()
+    df = pd.DataFrame(records)
+    # Ensure all expected columns exist
+    expected_columns = [
+        "response_id", "created_at", "updated_at", "manager_email", "manager_name",
+        "employee_id", "employee_name", "employee_email", "branch", "dept",
+        "job_title", "executive_email", "questions_score", "number_of_nos",
+        "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
+        "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
+        "status", "employee_token", "manager_token", "executive_token"
+    ]
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = ""
+    
+    if df.empty:
         return False
 
-    match = responses_df[responses_df['response_id'] == response_id]
+    match = df[df['response_id'] == response_id]
     if match.empty:
         return False
 
     row_index = match.index[0] + 2
-    worksheet = spreadsheet.worksheet(RESPONSES_TAB)
     header = worksheet.row_values(1)
     row_values = worksheet.row_values(row_index)
     row_data = {header[i]: row_values[i] if i < len(row_values) else "" for i in range(len(header))}
@@ -660,6 +674,10 @@ def process_action(action, response_id, token):
             return
 
         st.info(f"Found record for {response.get('employee_name', 'Unknown')} - Status: {response['status']}")
+        if response.get('comments', '').strip():
+            st.info(f"Comments present: {len(response['comments'])} characters")
+        else:
+            st.info("No comments found in record")
 
         valid = False
         stage_email = None
@@ -678,13 +696,18 @@ def process_action(action, response_id, token):
             updates['employee_agree_ts'] = now
             updates['status'] = 'Rejected by Employee'
             stage_email = 'rejected'
-        elif action == 'manager_approve' and response['status'] == 'Pending Manager' and token == response.get('manager_token'):
+        elif action == 'manager_approve' and (response['status'] == 'Pending Employee' or response['status'] == 'Pending Manager') and token == response.get('manager_token'):
             valid = True
             updates['manager_agree'] = 'Yes'
             updates['manager_agree_ts'] = now
-            updates['status'] = 'Pending Executive'
+            if response['status'] == 'Pending Employee':
+                # If employee hasn't responded yet, mark as manager-approved and pending executive
+                updates['status'] = 'Pending Executive'
+            else:
+                # If employee already approved, just move to executive
+                updates['status'] = 'Pending Executive'
             stage_email = 'executive'
-        elif action == 'manager_reject' and response['status'] == 'Pending Manager' and token == response.get('manager_token'):
+        elif action == 'manager_reject' and (response['status'] == 'Pending Employee' or response['status'] == 'Pending Manager') and token == response.get('manager_token'):
             valid = True
             updates['manager_agree'] = 'No'
             updates['manager_agree_ts'] = now
@@ -800,14 +823,28 @@ tab_new, tab_status = st.tabs(["Submit Scorecard", "Scorecard Status"])
 
 with tab_new:
     st.markdown("### Submit a new balanced score card")
+    
+    # Filter out employees that have already been reviewed
+    reviewed_employee_ids = set()
+    if not responses_df.empty:
+        manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+        reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
+    
+    available_employees = manager_employees[~manager_employees['ID'].astype(str).isin(reviewed_employee_ids)]
+    
+    if available_employees.empty:
+        st.success("🎉 **All employees under your supervision have been reviewed!**")
+        st.info("You have successfully completed performance reviews for all your direct reports.")
+        st.stop()
+    
     selected_employee_id = st.selectbox(
         "Select employee to rate",
-        manager_employees['ID'].astype(str).tolist(),
-        format_func=lambda eid: f"{manager_employees[manager_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
+        available_employees['ID'].astype(str).tolist(),
+        format_func=lambda eid: f"{available_employees[available_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
     )
-    selected_employee = manager_employees[manager_employees['ID'].astype(str) == selected_employee_id].iloc[0]
-    st.write(f"**Employee:** {selected_employee['name']}  |  **Branch:** {selected_employee.get('branch', '')}  |  **Dept:** {selected_employee.get('dept', '')}")
-    st.write(f"**Title:** {selected_employee.get('job_title', '')}  |  **Executive:** {selected_employee.get('executive_email', '')}")
+    selected_employee = available_employees[available_employees['ID'].astype(str) == selected_employee_id].iloc[0]
+    st.write(f"Employee: {selected_employee['name']} | Branch: {selected_employee.get('branch', '')} | Dept: {selected_employee.get('dept', '')}")
+    st.write(f"Title: {selected_employee.get('job_title', '')} | Executive: {selected_employee.get('executive_email', '')}")
     st.divider()
 
     questions_df = st.session_state.questions_df
