@@ -1,6 +1,901 @@
 import streamlit as st
+import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime
+import json
+import uuid
+import smtplib
+from email.message import EmailMessage
+from urllib.parse import urlencode
 
-st.title("🎈 My new app")
-st.write(
-    "Let's start building! For help and inspiration, head over to [docs.streamlit.io](https://docs.streamlit.io/)."
+# ============================================================================
+# PAGE CONFIG
+# ============================================================================
+st.set_page_config(
+    page_title="Leader Level Balanced Score Card",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
+
+custom_css = """
+<style>
+    :root {
+        --font-family: 'Verdana', sans-serif;
+        --primary-bg: #FFFFFF;
+        --primary-text: #000000;
+        --secondary-bg: #F8F9FA;
+        --accent-bg: #006B6B;
+        --accent-text: #FFFFFF;
+        --error-bg: #F8D7DA;
+        --error-text: #721C24;
+        --success-bg: #D4EDDA;
+        --success-text: #155724;
+        --warning-bg: #FFF3CD;
+        --warning-text: #856404;
+        --info-bg: #D1ECF1;
+        --info-text: #0C5460;
+    }
+
+    * {
+        font-family: 'Verdana', sans-serif !important;
+    }
+
+    /* Main app background and text */
+    body {
+        background-color: var(--primary-bg) !important;
+        color: var(--primary-text) !important;
+    }
+
+    .stApp {
+        background-color: var(--primary-bg) !important;
+    }
+
+    /* Headings and text elements */
+    h1, h2, h3, h4, h5, h6, p, label, span, div {
+        color: var(--primary-text) !important;
+    }
+
+    /* Buttons */
+    .stButton>button {
+        background-color: var(--accent-bg) !important;
+        color: var(--accent-text) !important;
+        border: 1px solid var(--accent-bg) !important;
+    }
+
+    .stButton>button:hover {
+        background-color: #005050 !important;
+        color: var(--accent-text) !important;
+        border: 1px solid #005050 !important;
+    }
+
+    .stButton>button:active {
+        background-color: #004040 !important;
+        color: var(--accent-text) !important;
+    }
+
+    /* Form elements */
+    .stTextInput, .stSelectbox, .stRadio, .stSlider {
+        font-family: 'Verdana', sans-serif !important;
+    }
+
+    .stTextInput input, .stSelectbox select {
+        color: var(--primary-text) !important;
+        background-color: var(--secondary-bg) !important;
+        border: 1px solid #DEE2E6 !important;
+    }
+
+    .stTextInput input:focus, .stSelectbox select:focus {
+        border-color: var(--accent-bg) !important;
+        box-shadow: 0 0 0 2px rgba(0, 107, 107, 0.25) !important;
+    }
+
+    /* Radio buttons */
+    .stRadio label {
+        color: var(--primary-text) !important;
+    }
+
+    /* Sidebar */
+    .css-1d391kg, .css-12oz5g7 {  /* Sidebar container */
+        background-color: var(--secondary-bg) !important;
+    }
+
+    .css-1d391kg .css-1v3fvcr, .css-12oz5g7 .css-1v3fvcr {  /* Sidebar content */
+        color: var(--primary-text) !important;
+    }
+
+    /* Status messages */
+    .stSuccess {
+        background-color: var(--success-bg) !important;
+        color: var(--success-text) !important;
+        border: 1px solid #C3E6CB !important;
+    }
+
+    .stError {
+        background-color: var(--error-bg) !important;
+        color: var(--error-text) !important;
+        border: 1px solid #F5C6CB !important;
+    }
+
+    .stWarning {
+        background-color: var(--warning-bg) !important;
+        color: var(--warning-text) !important;
+        border: 1px solid #FFEAA7 !important;
+    }
+
+    .stInfo {
+        background-color: var(--info-bg) !important;
+        color: var(--info-text) !important;
+        border: 1px solid #BEE5EB !important;
+    }
+
+    /* DataFrames and tables */
+    .dataframe {
+        color: var(--primary-text) !important;
+    }
+
+    .dataframe th {
+        background-color: var(--secondary-bg) !important;
+        color: var(--primary-text) !important;
+        border: 1px solid #DEE2E6 !important;
+    }
+
+    .dataframe td {
+        background-color: var(--primary-bg) !important;
+        color: var(--primary-text) !important;
+        border: 1px solid #DEE2E6 !important;
+    }
+
+    /* Expanders */
+    .streamlit-expanderHeader {
+        background-color: var(--secondary-bg) !important;
+        color: var(--primary-text) !important;
+    }
+
+    .streamlit-expanderContent {
+        background-color: var(--primary-bg) !important;
+        color: var(--primary-text) !important;
+    }
+
+    /* Dividers */
+    hr {
+        border-color: #DEE2E6 !important;
+    }
+
+    /* Links */
+    a {
+        color: var(--accent-bg) !important;
+    }
+
+    a:hover {
+        color: #005050 !important;
+    }
+
+    /* Code blocks */
+    code {
+        background-color: var(--secondary-bg) !important;
+        color: var(--primary-text) !important;
+        border: 1px solid #DEE2E6 !important;
+    }
+
+    /* Ensure all text has proper contrast */
+    .stMarkdown, .stText, .stHeader, .stSubheader {
+        color: var(--primary-text) !important;
+    }
+
+    /* Select dropdown improvements */
+    .stSelectbox div[data-baseweb="select"] {
+        background-color: var(--primary-bg) !important;
+        border: 2px solid var(--accent-bg) !important;
+        border-radius: 4px !important;
+    }
+
+    .stSelectbox div[data-baseweb="select"] * {
+        color: var(--primary-text) !important;
+        background-color: var(--primary-bg) !important;
+    }
+
+    .stSelectbox div[data-baseweb="select"] [data-baseweb="tag"] {
+        background-color: var(--accent-bg) !important;
+        color: var(--accent-text) !important;
+    }
+
+    .stSelectbox div[data-baseweb="select"] input {
+        color: var(--primary-text) !important;
+    }
+
+    .stSelectbox div[data-baseweb="select"] [role="listbox"] {
+        background-color: var(--primary-bg) !important;
+    }
+
+    .stSelectbox div[data-baseweb="select"] [role="option"] {
+        color: var(--primary-text) !important;
+        background-color: var(--primary-bg) !important;
+    }
+
+    .stSelectbox div[data-baseweb="select"] [role="option"]:hover {
+        background-color: var(--secondary-bg) !important;
+    }
+
+    .stSelectbox div[data-baseweb="select"] [aria-selected="true"] {
+        background-color: var(--accent-bg) !important;
+        color: var(--accent-text) !important;
+    }
+
+    /* Expander improvements */
+    .streamlit-expanderHeader {
+        background-color: var(--secondary-bg) !important;
+        color: var(--primary-text) !important;
+        font-weight: bold !important;
+        padding: 12px !important;
+        border: 1px solid #DEE2E6 !important;
+        border-radius: 4px !important;
+    }
+
+    .streamlit-expanderContent {
+        background-color: var(--primary-bg) !important;
+        color: var(--primary-text) !important;
+        padding: 16px !important;
+        border: 1px solid #DEE2E6 !important;
+        border-top: none !important;
+        border-radius: 0 0 4px 4px !important;
+    }
+
+    /* Better spacing for expander content */
+    .streamlit-expanderContent p {
+        margin: 8px 0 !important;
+        line-height: 1.5 !important;
+    }
+
+    .streamlit-expanderContent strong {
+        color: var(--primary-text) !important;
+    }
+
+    /* Status dashboard improvements */
+    .stExpander {
+        margin-bottom: 8px !important;
+    }
+
+    /* Employee info display improvements */
+    .stWrite p {
+        margin: 4px 0 !important;
+        padding: 2px 0 !important;
+    }
+
+    /* Tab improvements */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: var(--secondary-bg) !important;
+        border-radius: 4px 4px 0 0 !important;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        color: var(--primary-text) !important;
+        background-color: transparent !important;
+    }
+
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background-color: var(--primary-bg) !important;
+        color: var(--accent-bg) !important;
+        font-weight: bold !important;
+    }
+</style>
+"""
+st.markdown(custom_css, unsafe_allow_html=True)
+
+# ============================================================================
+# GOOGLE SHEETS CONFIG
+# ============================================================================
+GOOGLE_SHEET_ID = "1DfYJwlKy01G0tcZ11FUen4fPjSnK9vWT33a2sKfRKko"
+EMPLOYEES_TAB = "Employees"
+QUESTIONS_TAB = "Questions"
+RESPONSES_TAB = "Responses"
+
+# Optional Streamlit secrets values:
+# [gcp_service_account]
+# ... your service account JSON fields ...
+# [smtp]
+# server = "smtp.example.com"
+# port = 587
+# username = "user@example.com"
+# password = "secret"
+# from_email = "no-reply@example.com"
+# [app]
+# url = "https://your-app-url.streamlit.app"
+
+# ============================================================================
+# GOOGLE SHEETS UTILITIES
+# ============================================================================
+
+@st.cache_resource
+def get_spreadsheet():
+    try:
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        client = gspread.authorize(creds)
+        return client.open_by_key(GOOGLE_SHEET_ID)
+    except KeyError:
+        st.error("❌ Google service account credentials not found in secrets.")
+        st.info("Please configure your `.streamlit/secrets.toml` file with the service account credentials.")
+        st.stop()
+    except PermissionError:
+        st.error("❌ Permission denied accessing Google Sheet.")
+        st.info("Make sure:")
+        st.info("1. The service account email has been shared with the Google Sheet")
+        st.info("2. The GOOGLE_SHEET_ID is correct")
+        st.info("3. The service account has 'Editor' access to the sheet")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ Error connecting to Google Sheets: {e}")
+        st.info("Please check your service account configuration and Google Sheet permissions.")
+        st.stop()
+
+@st.cache_data(ttl=3600)
+def load_sheet(tab_name):
+    spreadsheet = get_spreadsheet()
+    try:
+        worksheet = spreadsheet.worksheet(tab_name)
+        records = worksheet.get_all_records()
+        return pd.DataFrame(records)
+    except gspread.exceptions.WorksheetNotFound:
+        return pd.DataFrame()
+    except Exception as exc:
+        st.error(f"Unable to load `{tab_name}` sheet: {exc}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_responses():
+    spreadsheet = get_spreadsheet()
+    worksheet = ensure_responses_sheet(spreadsheet)
+    records = worksheet.get_all_records()
+    df = pd.DataFrame(records)
+    # Ensure all expected columns exist, even if sheet is empty
+    expected_columns = [
+        "response_id", "created_at", "updated_at", "manager_email", "manager_name",
+        "employee_id", "employee_name", "employee_email", "branch", "dept",
+        "job_title", "executive_email", "questions_score", "number_of_nos",
+        "responses", "employee_agree", "manager_agree", "executive_agree",
+        "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
+        "status", "employee_token", "manager_token", "executive_token"
+    ]
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = ""
+    return df
+
+def ensure_responses_sheet(spreadsheet):
+    headers = [
+        "response_id",
+        "created_at",
+        "updated_at",
+        "manager_email",
+        "manager_name",
+        "employee_id",
+        "employee_name",
+        "employee_email",
+        "branch",
+        "dept",
+        "job_title",
+        "executive_email",
+        "questions_score",
+        "number_of_nos",
+        "responses",
+        "employee_agree",
+        "manager_agree",
+        "executive_agree",
+        "employee_agree_ts",
+        "manager_agree_ts",
+        "executive_agree_ts",
+        "status",
+        "employee_token",
+        "manager_token",
+        "executive_token"
+    ]
+    try:
+        worksheet = spreadsheet.worksheet(RESPONSES_TAB)
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(RESPONSES_TAB, rows=1000, cols=len(headers))
+        worksheet.append_row(headers)
+    return worksheet
+
+# ============================================================================
+# EMAIL UTILITIES
+# ============================================================================
+
+def get_app_url():
+    return st.secrets.get("app", {}).get("url", "").rstrip("/")
+
+def build_action_link(response_id, token, action):
+    base = get_app_url()
+    if not base:
+        return ""
+    params = {
+        "response_id": response_id,
+        "token": token,
+        "action": action
+    }
+    return f"{base}/?{urlencode(params)}"
+
+
+def send_email(subject, html_body, recipient):
+    smtp_config = st.secrets.get("smtp", {})
+    if not smtp_config:
+        return False
+
+    try:
+        message = EmailMessage()
+        message["Subject"] = subject
+        message["From"] = smtp_config.get("from_email", smtp_config.get("username"))
+        message["To"] = recipient
+        message.set_content("Please view this message in an HTML-capable email client.")
+        message.add_alternative(html_body, subtype="html")
+
+        server = smtplib.SMTP(smtp_config["server"], int(smtp_config.get("port", 587)))
+        server.starttls()
+        server.login(smtp_config["username"], smtp_config["password"])
+        server.send_message(message)
+        server.quit()
+        return True
+    except Exception as exc:
+        st.error(f"Email send failed: {exc}")
+        return False
+
+
+def format_scorecard_summary(employee, question_rows, answers):
+    lines = []
+    lines.append(f"<p><strong>Employee:</strong> {employee['name']} ({employee['ID']})</p>")
+    lines.append(f"<p><strong>Branch:</strong> {employee.get('branch', '')} &nbsp;&nbsp; <strong>Dept:</strong> {employee.get('dept', '')} &nbsp;&nbsp; <strong>Job Title:</strong> {employee.get('job_title', '')}</p>")
+    lines.append("<table border='0' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>")
+    lines.append("<tr><th align='left'>Section</th><th align='left'>Question</th><th align='left'>Answer</th></tr>")
+    for _, row in question_rows.iterrows():
+        answer = answers.get(str(row['ID']), "")
+        lines.append(f"<tr><td>{row['question_section']}</td><td>{row['question']}</td><td>{answer}</td></tr>")
+    lines.append("</table>")
+    return "".join(lines)
+
+
+def format_email_body(subject, employee, question_rows, answers, stage, approve_link, reject_link):
+    score_answers = [int(v) for qid, v in answers.items() if v in ["1", "2", "3"]]
+    questions_score = int(round(sum(score_answers) / len(score_answers) * 100)) if score_answers else 0
+    number_of_nos = sum(1 for qid, v in answers.items() if v == "No")
+
+    html = [f"<h2>{subject}</h2>"]
+    html.append(format_scorecard_summary(employee, question_rows, answers))
+    html.append(f"<p><strong>Score:</strong> {questions_score}</p>")
+    html.append(f"<p><strong>Number of No answers:</strong> {number_of_nos}</p>")
+    html.append("<p>Please approve or reject using the links below.</p>")
+    if approve_link:
+        html.append(f"<p><a href=\"{approve_link}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Approve</a></p>")
+    if reject_link:
+        html.append(f"<p><a href=\"{reject_link}\" style=\"background:#A80000;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Reject</a></p>")
+    html.append("<p>If you have any questions, please contact your manager.</p>")
+    return "".join(html)
+
+# ============================================================================
+# RESPONSE OPERATIONS
+# ============================================================================
+
+def find_response_by_id(response_id):
+    responses_df = load_responses()
+    if responses_df.empty:
+        return None, None, None
+    matches = responses_df[responses_df['response_id'] == response_id]
+    if matches.empty:
+        return None, None, None
+    row = matches.iloc[0]
+    row_index = matches.index[0] + 2  # account for header row
+    return row.to_dict(), row_index, responses_df
+
+
+def update_response(response_id, updates):
+    spreadsheet = get_spreadsheet()
+    responses_df = load_responses()
+    if responses_df.empty:
+        return False
+
+    match = responses_df[responses_df['response_id'] == response_id]
+    if match.empty:
+        return False
+
+    row_index = match.index[0] + 2
+    worksheet = spreadsheet.worksheet(RESPONSES_TAB)
+    header = worksheet.row_values(1)
+    row_values = worksheet.row_values(row_index)
+    row_data = {header[i]: row_values[i] if i < len(row_values) else "" for i in range(len(header))}
+
+    for key, value in updates.items():
+        if key not in header:
+            header.append(key)
+            row_data[key] = value
+
+    ordered_row = [row_data.get(col, "") for col in header]
+    worksheet.update(f"A{row_index}:{chr(64 + len(header))}{row_index}", [ordered_row])
+    load_responses.clear()
+    return True
+
+
+def append_response(row):
+    spreadsheet = get_spreadsheet()
+    worksheet = ensure_responses_sheet(spreadsheet)
+    header = worksheet.row_values(1)
+    ordered_row = [row.get(col, "") for col in header]
+    worksheet.append_row(ordered_row)
+    load_responses.clear()
+
+
+def create_response_entry(manager, employee, answers):
+    score_answers = [int(v) for qid, v in answers.items() if v in ["1", "2", "3"]]
+    questions_score = int(round(sum(score_answers) / len(score_answers) * 100)) if score_answers else 0
+    number_of_nos = sum(1 for qid, v in answers.items() if v == "No")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entry = {
+        "response_id": str(uuid.uuid4()),
+        "created_at": now,
+        "updated_at": now,
+        "manager_email": manager['manager_email'],
+        "manager_name": manager.get('manager_name', ""),
+        "employee_id": str(employee['ID']),
+        "employee_name": employee['name'],
+        "employee_email": employee['email'],
+        "branch": employee.get('branch', ""),
+        "dept": employee.get('dept', ""),
+        "job_title": employee.get('job_title', ""),
+        "executive_email": employee.get('executive_email', ""),
+        "questions_score": questions_score,
+        "number_of_nos": number_of_nos,
+        "responses": json.dumps(answers),
+        "employee_agree": "",
+        "manager_agree": "",
+        "executive_agree": "",
+        "employee_agree_ts": "",
+        "manager_agree_ts": "",
+        "executive_agree_ts": "",
+        "status": "Pending Employee",
+        "employee_token": str(uuid.uuid4()),
+        "manager_token": str(uuid.uuid4()),
+        "executive_token": str(uuid.uuid4())
+    }
+    return entry
+
+
+def load_employee_questions():
+    df = load_sheet(QUESTIONS_TAB)
+    if df.empty:
+        st.warning("Questions sheet is empty or missing. Please check the Google Sheet.")
+    return df
+
+# ============================================================================
+# APPROVAL WORKFLOW
+# ============================================================================
+
+def get_stage_links(response):
+    approve_link = None
+    reject_link = None
+    if response['status'] == 'Pending Employee':
+        approve_link = build_action_link(response['response_id'], response['employee_token'], 'employee_approve')
+        reject_link = build_action_link(response['response_id'], response['employee_token'], 'employee_reject')
+    elif response['status'] == 'Pending Manager':
+        approve_link = build_action_link(response['response_id'], response['manager_token'], 'manager_approve')
+        reject_link = build_action_link(response['response_id'], response['manager_token'], 'manager_reject')
+    elif response['status'] == 'Pending Executive':
+        approve_link = build_action_link(response['response_id'], response['executive_token'], 'executive_approve')
+        reject_link = build_action_link(response['response_id'], response['executive_token'], 'executive_reject')
+    return approve_link, reject_link
+
+
+def send_stage_email(response, stage):
+    question_rows = load_employee_questions()
+    questions_for_email = question_rows.copy()
+    try:
+        answers = json.loads(response['responses']) if isinstance(response['responses'], str) else response['responses']
+    except Exception:
+        answers = {}
+
+    approve_link, reject_link = get_stage_links(response)
+    stage_label = {
+        'employee': 'Employee Verification',
+        'manager': 'Manager Approval',
+        'executive': 'Executive Approval',
+        'rejected': 'Review Required'
+    }.get(stage, stage)
+
+    subject = f"Leader Level Balanced Score Card - {stage_label}"
+    
+    # Create employee object from response data for email formatting
+    employee = {
+        'name': response.get('employee_name', ''),
+        'ID': response.get('employee_id', ''),
+        'branch': response.get('branch', ''),
+        'dept': response.get('dept', ''),
+        'job_title': response.get('job_title', '')
+    }
+    
+    body = format_email_body(subject, employee, questions_for_email, answers, stage, approve_link, reject_link)
+    recipient = ''
+
+    if stage == 'employee':
+        recipient = response.get('employee_email', '')
+    elif stage == 'manager':
+        recipient = response.get('manager_email', '')
+    elif stage == 'executive':
+        recipient = response.get('executive_email', '')
+    else:
+        recipient = response.get('manager_email', '')
+
+    success = send_email(subject, body, recipient)
+    return success, recipient, body
+
+
+def process_action(action, response_id, token):
+    response, _, _ = find_response_by_id(response_id)
+    if not response:
+        st.error("Approval record not found.")
+        return
+
+    valid = False
+    stage_email = None
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    updates = {"updated_at": now}
+
+    if action == 'employee_approve' and response['status'] == 'Pending Employee' and token == response.get('employee_token'):
+        valid = True
+        updates['employee_agree'] = 'Yes'
+        updates['employee_agree_ts'] = now
+        updates['status'] = 'Pending Manager'
+        stage_email = 'manager'
+    elif action == 'employee_reject' and response['status'] == 'Pending Employee' and token == response.get('employee_token'):
+        valid = True
+        updates['employee_agree'] = 'No'
+        updates['employee_agree_ts'] = now
+        updates['status'] = 'Rejected by Employee'
+        stage_email = 'rejected'
+    elif action == 'manager_approve' and response['status'] == 'Pending Manager' and token == response.get('manager_token'):
+        valid = True
+        updates['manager_agree'] = 'Yes'
+        updates['manager_agree_ts'] = now
+        updates['status'] = 'Pending Executive'
+        stage_email = 'executive'
+    elif action == 'manager_reject' and response['status'] == 'Pending Manager' and token == response.get('manager_token'):
+        valid = True
+        updates['manager_agree'] = 'No'
+        updates['manager_agree_ts'] = now
+        updates['status'] = 'Rejected by Manager'
+        stage_email = 'rejected'
+    elif action == 'executive_approve' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
+        valid = True
+        updates['executive_agree'] = 'Yes'
+        updates['executive_agree_ts'] = now
+        updates['status'] = 'Approved'
+    elif action == 'executive_reject' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
+        valid = True
+        updates['executive_agree'] = 'No'
+        updates['executive_agree_ts'] = now
+        updates['status'] = 'Rejected by Executive'
+        stage_email = 'rejected'
+
+    if not valid:
+        st.error("This approval link is invalid or the action is not allowed.")
+        return
+
+    if update_response(response_id, updates):
+        st.success("Thank you. The scorecard status has been updated.")
+        if stage_email:
+            sent, recipient, body = send_stage_email({**response, **updates}, stage_email)
+            if sent:
+                st.info(f"Notification email sent to {recipient}.")
+            else:
+                st.info("Email could not be sent. Please use the app URL or email preview instead.")
+    else:
+        st.error("Unable to update the response record.")
+
+# ============================================================================
+# MAIN UI
+# ============================================================================
+
+st.title("Leader Level Balanced Score Card")
+
+# Check if secrets are configured
+if "gcp_service_account" not in st.secrets:
+    st.error("❌ Google service account credentials not configured.")
+    st.info("**Setup Required:**")
+    st.info("1. Create a Google Cloud service account and download the JSON key")
+    st.info("2. Share your Google Sheet with the service account email")
+    st.info("3. Add the credentials to `.streamlit/secrets.toml`")
+    st.info("See README.md for detailed setup instructions.")
+    st.stop()
+
+query_params = st.query_params
+action = query_params.get('action', [None])[0]
+response_id = query_params.get('response_id', [None])[0]
+token = query_params.get('token', [None])[0]
+
+if action and response_id and token:
+    st.info("Processing approval link...")
+    process_action(action, response_id, token)
+    st.stop()
+
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.manager_email = ''
+    st.session_state.manager_name = ''
+    st.session_state.data_loaded = False
+
+if not st.session_state.data_loaded:
+    with st.spinner("Loading data..."):
+        employees_df = load_sheet(EMPLOYEES_TAB)
+        questions_df = load_sheet(QUESTIONS_TAB)
+        responses_df = load_responses()
+        st.session_state.employees_df = employees_df
+        st.session_state.questions_df = questions_df
+        st.session_state.responses_df = responses_df
+        st.session_state.data_loaded = True
+
+if not st.session_state.logged_in:
+    st.subheader("🔐 Manager Login")
+    login_email = st.text_input("Enter your manager email:", placeholder="manager@example.com").strip().lower()
+    if st.button("Login", type='primary'):
+        if login_email and login_email in st.session_state.employees_df['manager_email'].astype(str).str.lower().values:
+            manager_row = st.session_state.employees_df[st.session_state.employees_df['manager_email'].astype(str).str.lower() == login_email].iloc[0]
+            st.session_state.logged_in = True
+            st.session_state.manager_email = login_email
+            st.session_state.manager_name = manager_row.get('manager_name', login_email)
+            st.rerun()
+        else:
+            st.error("Manager email not found. Please enter an email listed in the Employees sheet.")
+    st.stop()
+
+st.sidebar.markdown(f"**Signed in as:** {st.session_state.manager_name} ({st.session_state.manager_email})")
+if st.sidebar.button("Logout"):
+    st.session_state.logged_in = False
+    st.session_state.manager_email = ''
+    st.session_state.manager_name = ''
+    st.rerun()
+
+manager_employees = st.session_state.employees_df[st.session_state.employees_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+if manager_employees.empty:
+    st.warning("No employees found for this manager email.")
+    st.stop()
+
+responses_df = load_responses()
+responses_df['employee_id'] = responses_df['employee_id'].astype(str)
+
+st.subheader("📋 Manager Dashboard")
+
+tab_new, tab_status = st.tabs(["Submit Scorecard", "Scorecard Status"])
+
+with tab_new:
+    st.markdown("### Submit a new balanced score card")
+    selected_employee_id = st.selectbox(
+        "Select employee to rate",
+        manager_employees['ID'].astype(str).tolist(),
+        format_func=lambda eid: f"{manager_employees[manager_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
+    )
+    selected_employee = manager_employees[manager_employees['ID'].astype(str) == selected_employee_id].iloc[0]
+    st.write(f"**Employee:** {selected_employee['name']}  |  **Branch:** {selected_employee.get('branch', '')}  |  **Dept:** {selected_employee.get('dept', '')}")
+    st.write(f"**Title:** {selected_employee.get('job_title', '')}  |  **Executive:** {selected_employee.get('executive_email', '')}")
+    st.divider()
+
+    questions_df = st.session_state.questions_df
+    if questions_df.empty:
+        st.warning("The Questions sheet is empty. Please add questions to the Google Sheet.")
+    else:
+        questions_df = questions_df.fillna("")
+        sections = questions_df['question_section'].astype(str).fillna('General').unique().tolist()
+        answers = {}
+        for section in sections:
+            section_rows = questions_df[questions_df['question_section'].astype(str) == section]
+            header_text = section_rows['header'].astype(str).fillna('').iloc[0]
+            if header_text:
+                st.markdown(f"### {header_text}")
+            for _, question in section_rows.iterrows():
+                key = f"q_{selected_employee_id}_{question['ID']}"
+                if str(question['type']).strip().lower() == 'score':
+                    answers[str(question['ID'])] = st.radio(
+                        question['question'],
+                        options=['1', '2', '3'],
+                        key=key,
+                        index=0
+                    )
+                else:
+                    answers[str(question['ID'])] = st.radio(
+                        question['question'],
+                        options=['Yes', 'No'],
+                        key=key,
+                        index=0
+                    )
+            st.divider()
+
+        if st.button("Submit Draft", type='primary'):
+            missing = [qid for qid, value in answers.items() if value in [None, '']]
+            if missing:
+                st.error("Please answer every question before submitting.")
+            else:
+                manager_row = manager_employees.iloc[0]
+                response_entry = create_response_entry(manager_row, selected_employee, answers)
+                append_response(response_entry)
+                stage_email = 'employee'
+                sent, recipient, preview = send_stage_email(response_entry, stage_email)
+                st.success("Draft saved and sent to employee for verification.")
+                if sent:
+                    st.info(f"Verification email sent to {recipient}.")
+                else:
+                    st.warning("SMTP is not configured. Copy the approval links below and send them manually if needed.")
+                    approve_link, reject_link = get_stage_links(response_entry)
+                    st.markdown(f"**Approve:** {approve_link}")
+                    st.markdown(f"**Reject:** {reject_link}")
+                st.rerun()
+
+with tab_status:
+    st.markdown("### Your scorecard status dashboard")
+    if responses_df.empty:
+        st.info("No scorecards submitted yet.")
+    else:
+        manager_responses = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+        if manager_responses.empty:
+            st.info("No scorecards found for your manager email.")
+        else:
+            manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
+            for _, row in manager_responses.iterrows():
+                status_color = {
+                    'Pending Employee': '🟡',
+                    'Pending Manager': '🟠',
+                    'Pending Executive': '🔴',
+                    'Approved': '🟢',
+                    'Rejected by Employee': '🔴',
+                    'Rejected by Manager': '🔴',
+                    'Rejected by Executive': '🔴'
+                }.get(row['status'], '⚪')
+
+                with st.expander(f"{status_color} {row['employee_name']} — {row['status']}"):
+                    # Create a cleaner layout with columns
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.markdown("**📊 Scorecard Details:**")
+                        st.write(f"• **Score:** {row['questions_score']}/100")
+                        st.write(f"• **No answers:** {row['number_of_nos']}")
+                        st.write(f"• **Created:** {row['created_at']}")
+                        st.write(f"• **Last updated:** {row['updated_at']}")
+
+                    with col2:
+                        st.markdown("**👥 Approval Status:**")
+                        emp_status = f"✅ Yes" if row['employee_agree'] == 'Yes' else f"❌ No" if row['employee_agree'] == 'No' else "⏳ Pending"
+                        st.write(f"• **Employee:** {emp_status}")
+                        if row['employee_agree_ts']:
+                            st.write(f"  _{row['employee_agree_ts']}_")
+
+                        mgr_status = f"✅ Yes" if row['manager_agree'] == 'Yes' else f"❌ No" if row['manager_agree'] == 'No' else "⏳ Pending"
+                        st.write(f"• **Manager:** {mgr_status}")
+                        if row['manager_agree_ts']:
+                            st.write(f"  _{row['manager_agree_ts']}_")
+
+                        exec_status = f"✅ Yes" if row['executive_agree'] == 'Yes' else f"❌ No" if row['executive_agree'] == 'No' else "⏳ Pending"
+                        st.write(f"• **Executive:** {exec_status}")
+                        if row['executive_agree_ts']:
+                            st.write(f"  _{row['executive_agree_ts']}_")
+
+                    # Status message with better formatting
+                    st.markdown("---")
+                    if row['status'] == 'Pending Employee':
+                        st.info("⏳ **Next Step:** Waiting for employee verification via email.")
+                    elif row['status'] == 'Pending Manager':
+                        st.warning("⚠️ **Action Required:** Your approval is needed.")
+                    elif row['status'] == 'Pending Executive':
+                        st.info("⏳ **Next Step:** Waiting for executive approval.")
+                    elif row['status'] == 'Approved':
+                        st.success("✅ **Complete:** This scorecard is fully approved!")
+                    else:
+                        st.error("❌ **Rejected:** This scorecard was rejected and requires review.")
+
+                    # Resend email button
+                    if st.button(f"📧 Resend approval email", key=f"resend_{row['response_id']}", help="Send the current approval email again"):
+                        stage = 'employee' if row['status'] == 'Pending Employee' else 'manager' if row['status'] == 'Pending Manager' else 'executive' if row['status'] == 'Pending Executive' else 'rejected'
+                        sent, recipient, preview = send_stage_email(row, stage)
+                        if sent:
+                            st.success(f"✅ Email resent to {recipient}.")
+                        else:
+                            st.warning("⚠️ SMTP not configured. Use the preview links below.")
+                            approve_link, reject_link = get_stage_links(row)
+                            st.markdown(f"**🔗 Approve:** {approve_link}")
+                            st.markdown(f"**🔗 Reject:** {reject_link}")
