@@ -23,265 +23,32 @@ st.set_page_config(
 # Global debug variables
 load_responses_debug = []
 
+# Minimal CSS to avoid breaking Streamlit's UI rendering
 custom_css = """
 <style>
-    :root {
-        --font-family: 'Verdana', sans-serif;
-        --primary-bg: #FFFFFF;
-        --primary-text: #000000;
-        --secondary-bg: #F8F9FA;
-        --accent-bg: #006B6B;
-        --accent-text: #FFFFFF;
-        --error-bg: #F8D7DA;
-        --error-text: #721C24;
-        --success-bg: #D4EDDA;
-        --success-text: #155724;
-        --warning-bg: #FFF3CD;
-        --warning-text: #856404;
-        --info-bg: #D1ECF1;
-        --info-text: #0C5460;
-    }
-
-    * {
-        font-family: 'Verdana', sans-serif !important;
-    }
-
-    /* Main app background and text */
-    body {
-        background-color: var(--primary-bg) !important;
-        color: var(--primary-text) !important;
-    }
-
-    .stApp {
-        background-color: var(--primary-bg) !important;
-    }
-
-    /* Headings and text elements */
-    h1, h2, h3, h4, h5, h6, p, label, span, div {
-        color: var(--primary-text) !important;
-    }
-
-    /* Buttons */
+    /* Only style specific elements without using !important excessively */
+    /* Let Streamlit handle its own theme */
     .stButton>button {
-        background-color: var(--accent-bg) !important;
-        color: var(--accent-text) !important;
-        border: 1px solid var(--accent-bg) !important;
+        background-color: #006B6B;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-weight: 500;
     }
-
+    
     .stButton>button:hover {
-        background-color: #005050 !important;
-        color: var(--accent-text) !important;
-        border: 1px solid #005050 !important;
+        background-color: #005050;
     }
-
-    .stButton>button:active {
-        background-color: #004040 !important;
-        color: var(--accent-text) !important;
-    }
-
-    /* Form elements */
-    .stTextInput, .stSelectbox, .stRadio, .stSlider {
-        font-family: 'Verdana', sans-serif !important;
-    }
-
-    .stTextInput input, .stSelectbox select {
-        color: var(--primary-text) !important;
-        background-color: var(--secondary-bg) !important;
-        border: 1px solid #DEE2E6 !important;
-    }
-
-    .stTextInput input:focus, .stSelectbox select:focus {
-        border-color: var(--accent-bg) !important;
-        box-shadow: 0 0 0 2px rgba(0, 107, 107, 0.25) !important;
-    }
-
-    /* Radio buttons */
-    .stRadio label {
-        color: var(--primary-text) !important;
-    }
-
-    /* Sidebar */
-    .css-1d391kg, .css-12oz5g7 {  /* Sidebar container */
-        background-color: var(--secondary-bg) !important;
-    }
-
-    .css-1d391kg .css-1v3fvcr, .css-12oz5g7 .css-1v3fvcr {  /* Sidebar content */
-        color: var(--primary-text) !important;
-    }
-
-    /* Status messages */
-    .stSuccess {
-        background-color: var(--success-bg) !important;
-        color: var(--success-text) !important;
-        border: 1px solid #C3E6CB !important;
-    }
-
-    .stError {
-        background-color: var(--error-bg) !important;
-        color: var(--error-text) !important;
-        border: 1px solid #F5C6CB !important;
-    }
-
-    .stWarning {
-        background-color: var(--warning-bg) !important;
-        color: var(--warning-text) !important;
-        border: 1px solid #FFEAA7 !important;
-    }
-
-    .stInfo {
-        background-color: var(--info-bg) !important;
-        color: var(--info-text) !important;
-        border: 1px solid #BEE5EB !important;
-    }
-
-    /* DataFrames and tables */
-    .dataframe {
-        color: var(--primary-text) !important;
-    }
-
-    .dataframe th {
-        background-color: var(--secondary-bg) !important;
-        color: var(--primary-text) !important;
-        border: 1px solid #DEE2E6 !important;
-    }
-
-    .dataframe td {
-        background-color: var(--primary-bg) !important;
-        color: var(--primary-text) !important;
-        border: 1px solid #DEE2E6 !important;
-    }
-
-    /* Expanders */
-    .streamlit-expanderHeader {
-        background-color: var(--secondary-bg) !important;
-        color: var(--primary-text) !important;
-    }
-
-    .streamlit-expanderContent {
-        background-color: var(--primary-bg) !important;
-        color: var(--primary-text) !important;
-    }
-
-    /* Dividers */
-    hr {
-        border-color: #DEE2E6 !important;
-    }
-
-    /* Links */
-    a {
-        color: var(--accent-bg) !important;
-    }
-
-    a:hover {
-        color: #005050 !important;
-    }
-
-    /* Code blocks */
+    
     code {
-        background-color: var(--secondary-bg) !important;
-        color: var(--primary-text) !important;
-        border: 1px solid #DEE2E6 !important;
+        background-color: #f0f0f0;
+        border-radius: 4px;
+        padding: 2px 4px;
     }
-
-    /* Ensure all text has proper contrast */
-    .stMarkdown, .stText, .stHeader, .stSubheader {
-        color: var(--primary-text) !important;
-    }
-
-    /* Select dropdown improvements */
-    .stSelectbox div[data-baseweb="select"] {
-        background-color: var(--primary-bg) !important;
-        border: 2px solid var(--accent-bg) !important;
-        border-radius: 4px !important;
-    }
-
-    .stSelectbox div[data-baseweb="select"] * {
-        color: var(--primary-text) !important;
-        background-color: var(--primary-bg) !important;
-    }
-
-    .stSelectbox div[data-baseweb="select"] [data-baseweb="tag"] {
-        background-color: var(--accent-bg) !important;
-        color: var(--accent-text) !important;
-    }
-
-    .stSelectbox div[data-baseweb="select"] input {
-        color: var(--primary-text) !important;
-    }
-
-    .stSelectbox div[data-baseweb="select"] [role="listbox"] {
-        background-color: var(--primary-bg) !important;
-    }
-
-    .stSelectbox div[data-baseweb="select"] [role="option"] {
-        color: var(--primary-text) !important;
-        background-color: var(--primary-bg) !important;
-    }
-
-    .stSelectbox div[data-baseweb="select"] [role="option"]:hover {
-        background-color: var(--secondary-bg) !important;
-    }
-
-    .stSelectbox div[data-baseweb="select"] [aria-selected="true"] {
-        background-color: var(--accent-bg) !important;
-        color: var(--accent-text) !important;
-    }
-
-    /* Expander improvements */
+    
+    /* Expander styling only */
     .streamlit-expanderHeader {
-        background-color: var(--secondary-bg) !important;
-        color: var(--primary-text) !important;
-        font-weight: bold !important;
-        padding: 12px !important;
-        border: 1px solid #DEE2E6 !important;
-        border-radius: 4px !important;
-    }
-
-    .streamlit-expanderContent {
-        background-color: var(--primary-bg) !important;
-        color: var(--primary-text) !important;
-        padding: 16px !important;
-        border: 1px solid #DEE2E6 !important;
-        border-top: none !important;
-        border-radius: 0 0 4px 4px !important;
-    }
-
-    /* Better spacing for expander content */
-    .streamlit-expanderContent p {
-        margin: 8px 0 !important;
-        line-height: 1.5 !important;
-    }
-
-    .streamlit-expanderContent strong {
-        color: var(--primary-text) !important;
-    }
-
-    /* Status dashboard improvements */
-    .stExpander {
-        margin-bottom: 8px !important;
-    }
-
-    /* Employee info display improvements */
-    .stWrite p {
-        margin: 4px 0 !important;
-        padding: 2px 0 !important;
-    }
-
-    /* Tab improvements */
-    .stTabs [data-baseweb="tab-list"] {
-        background-color: var(--secondary-bg) !important;
-        border-radius: 4px 4px 0 0 !important;
-    }
-
-    .stTabs [data-baseweb="tab"] {
-        color: var(--primary-text) !important;
-        background-color: transparent !important;
-    }
-
-    .stTabs [data-baseweb="tab"][aria-selected="true"] {
-        background-color: var(--primary-bg) !important;
-        color: var(--accent-bg) !important;
-        font-weight: bold !important;
+        font-weight: bold;
     }
 </style>
 """
