@@ -916,8 +916,12 @@ with tab_status:
                 else:
                     st.info("No scorecards found for your manager email.")
             else:
+                st.write(f"Debug: About to display {len(manager_responses)} responses")
                 manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
-                for _, row in manager_responses.iterrows():
+                st.write(f"Debug: After sorting, shape = {manager_responses.shape}")
+                
+                for idx, row in manager_responses.iterrows():
+                    st.write(f"Debug: Processing response {idx}: {row['employee_name']} - {row['status']}")
                     with st.expander(f"{row['employee_name']} — {row['status']}"):
                         # Create a cleaner layout with columns
                         col1, col2 = st.columns(2)
