@@ -20,6 +20,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Global debug variables
+load_responses_debug = []
+
 custom_css = """
 <style>
     :root {
@@ -350,18 +353,20 @@ def load_sheet(tab_name):
 @st.cache_data(ttl=60)
 @lru_cache(maxsize=None)
 def load_responses():
-    print("DEBUG: load_responses() called")
+    global load_responses_debug
+    debug_messages = []
+    debug_messages.append("DEBUG: load_responses() called")
     try:
         spreadsheet = get_spreadsheet()
-        print(f"DEBUG: Got spreadsheet: {spreadsheet.title if spreadsheet else 'None'}")
+        debug_messages.append(f"DEBUG: Got spreadsheet: {spreadsheet.title if spreadsheet else 'None'}")
         worksheet = ensure_responses_sheet(spreadsheet)
-        print(f"DEBUG: Got worksheet: {worksheet.title if worksheet else 'None'}")
+        debug_messages.append(f"DEBUG: Got worksheet: {worksheet.title if worksheet else 'None'}")
         records = worksheet.get_all_records()
-        print(f"DEBUG: worksheet.get_all_records() returned {len(records)} records")
+        debug_messages.append(f"DEBUG: worksheet.get_all_records() returned {len(records)} records")
         if records:
-            print(f"DEBUG: First record keys: {list(records[0].keys()) if records else 'None'}")
+            debug_messages.append(f"DEBUG: First record keys: {list(records[0].keys()) if records else 'None'}")
         df = pd.DataFrame(records)
-        print(f"DEBUG: DataFrame shape after creation: {df.shape}")
+        debug_messages.append(f"DEBUG: DataFrame shape after creation: {df.shape}")
         # Ensure all expected columns exist, even if sheet is empty
         expected_columns = [
             "response_id", "created_at", "updated_at", "manager_email", "manager_name",
@@ -374,12 +379,19 @@ def load_responses():
         for col in expected_columns:
             if col not in df.columns:
                 df[col] = ""
-        print(f"DEBUG: Final DataFrame shape: {df.shape}")
+        debug_messages.append(f"DEBUG: Final DataFrame shape: {df.shape}")
+        
+        # Store debug messages in a global variable that can be accessed by the UI
+        load_responses_debug = debug_messages
+        
         return df
     except Exception as e:
-        print(f"DEBUG: load_responses() error: {e}")
+        debug_messages.append(f"DEBUG: load_responses() error: {e}")
         import traceback
-        traceback.print_exc()
+        debug_messages.append(f"DEBUG: Traceback: {traceback.format_exc()}")
+        
+        load_responses_debug = debug_messages
+        
         return pd.DataFrame()
 
 def ensure_responses_sheet(spreadsheet):
@@ -1062,6 +1074,14 @@ with tab_new:
 with tab_status:
     try:
         st.markdown("### Your scorecard status dashboard")
+        
+        # Show debug information
+        if 'load_responses_debug' in globals() and load_responses_debug:
+            with st.expander("🔧 Debug Information", expanded=True):
+                st.markdown("**Data Loading Debug:**")
+                for msg in load_responses_debug:
+                    st.code(msg)
+                st.markdown("---")
         
         # Always load fresh data for the status page
         current_responses_df = load_responses()
