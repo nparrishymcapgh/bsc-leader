@@ -808,6 +808,7 @@ if debug_mode:
     st.session_state.logged_in = True
     st.session_state.manager_email = 'debug@mode.com'
     st.session_state.manager_name = 'Debug User'
+    st.session_state.data_loaded = getattr(st.session_state, 'data_loaded', False)
     if not st.session_state.data_loaded:
         with st.spinner("Loading data..."):
             employees_df = load_sheet(EMPLOYEES_TAB)
