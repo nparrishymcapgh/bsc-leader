@@ -738,7 +738,7 @@ def process_action(action, response_id, token):
             updates['manager_agree_ts'] = now
             updates['status'] = 'Rejected by Manager'
             stage_email = 'rejected'
-        elif action == 'executive_approve' and token == response.get('executive_token'):
+        elif action == 'executive_approve' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
             st.info(f"Executive approval: token match = {token == response.get('executive_token')}, current status = {response['status']}")
             valid = True
             updates['executive_agree'] = 'Yes'
@@ -863,10 +863,13 @@ if st.sidebar.button("Logout"):
     st.session_state.manager_name = ''
     st.rerun()
 
-manager_employees = st.session_state.employees_df[st.session_state.employees_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-if manager_employees.empty:
-    st.warning("No employees found for this manager email.")
-    st.stop()
+if debug_mode:
+    manager_employees = st.session_state.employees_df  # Show all employees in debug mode
+else:
+    manager_employees = st.session_state.employees_df[st.session_state.employees_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+    if manager_employees.empty:
+        st.warning("No employees found for this manager email.")
+        st.stop()
 
 responses_df = load_responses()
 responses_df['employee_id'] = responses_df['employee_id'].astype(str)
