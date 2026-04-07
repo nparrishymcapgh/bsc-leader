@@ -874,110 +874,44 @@ with tab_new:
                     st.rerun()
 
 with tab_status:
-    st.write("DEBUG: Status tab started")
+    st.markdown("### Your scorecard status dashboard")
+
     try:
-        st.markdown("### Your scorecard status dashboard")
-        
-        # Show login status
-        st.write(f"Debug: logged_in = {st.session_state.get('logged_in', False)}")
-        st.write(f"Debug: manager_email = {st.session_state.get('manager_email', 'NOT SET')}")
-        st.write(f"Debug: manager_name = {st.session_state.get('manager_name', 'NOT SET')}")
-        
-        # Always load fresh data for the status page
         current_responses_df = load_responses()
-        
-        # Show debug information from session state
-        if 'load_responses_debug_list' in st.session_state and st.session_state.load_responses_debug_list:
-            with st.expander("🔧 Debug Information", expanded=True):
-                st.markdown("**Data Loading Debug:**")
-                for msg in st.session_state.load_responses_debug_list:
-                    st.code(msg)
-                st.markdown("---")
-        
-        st.write(f"Debug: responses_df shape = {current_responses_df.shape}")
-        
-        # Show all manager emails in the data for debugging
-        if not current_responses_df.empty:
-            unique_managers = current_responses_df['manager_email'].unique()
-            st.write(f"Debug: unique manager_emails in data = {list(unique_managers)}")
-        
+        manager_email = st.session_state.get('manager_email', '').strip().lower()
+
         if current_responses_df.empty:
             st.info("No scorecards submitted yet.")
         else:
-            # In debug mode, show all responses; otherwise filter by manager
             if debug_mode:
-                manager_responses = current_responses_df
-                st.info("🔧 DEBUG MODE: Showing all responses from all managers")
+                manager_responses = current_responses_df.copy()
             else:
-                manager_responses = current_responses_df[current_responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-                st.write(f"Debug: filtering by manager_email '{st.session_state.manager_email}' (lowercase comparison)")
-            
-            st.write(f"Debug: manager_responses shape = {manager_responses.shape}")
-            
+                manager_responses = current_responses_df[
+                    current_responses_df['manager_email'].astype(str).str.strip().str.lower() == manager_email
+                ].copy()
+
             if manager_responses.empty:
-                if debug_mode:
-                    st.error("No responses found in the system.")
-                else:
-                    st.info("No scorecards found for your manager email.")
+                st.info("No scorecards found for your manager email.")
             else:
-                st.write(f"Debug: About to display {len(manager_responses)} responses")
                 manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
-                st.write(f"Debug: After sorting, shape = {manager_responses.shape}")
-                
-                for idx, row in manager_responses.iterrows():
-                    st.write(f"Debug: Processing response {idx}: {row['employee_name']} - {row['status']}")
-                    with st.expander(f"{row['employee_name']} — {row['status']}"):
-                        # Create a cleaner layout with columns
-                        col1, col2 = st.columns(2)
 
-                        with col1:
-                            st.markdown("Scorecard Details:")
-                            st.write(f"Score: {row['questions_score']}/100")
-                            st.write(f"No answers: {row['number_of_nos']}")
-                            st.write(f"Created: {row['created_at']}")
-                            st.write(f"Last updated: {row['updated_at']}")
+                # Hard fallback: always render a plain table first.
+                summary_columns = [
+                    'response_id', 'employee_name', 'employee_email', 'status',
+                    'questions_score', 'number_of_nos', 'created_at', 'updated_at'
+                ]
+                available_summary_columns = [c for c in summary_columns if c in manager_responses.columns]
+                st.dataframe(manager_responses[available_summary_columns], use_container_width=True)
 
-                        with col2:
-                            st.markdown("Approval Status:")
-                            emp_status = "Yes" if row['employee_agree'] == 'Yes' else "No" if row['employee_agree'] == 'No' else "Pending"
-                            st.write(f"Employee: {emp_status}")
-                            if row['employee_agree_ts']:
-                                st.write(f"  {row['employee_agree_ts']}")
-
-                            mgr_status = "Yes" if row['manager_agree'] == 'Yes' else "No" if row['manager_agree'] == 'No' else "Pending"
-                            st.write(f"Manager: {mgr_status}")
-                            if row['manager_agree_ts']:
-                                st.write(f"  {row['manager_agree_ts']}")
-
-                            exec_status = "Yes" if row['executive_agree'] == 'Yes' else "No" if row['executive_agree'] == 'No' else "Pending"
-                            st.write(f"Executive: {exec_status}")
-                            if row['executive_agree_ts']:
-                                st.write(f"  {row['executive_agree_ts']}")
-
-                        # Status message with better formatting
-                        st.markdown("---")
-                        if row['status'] == 'Pending Employee':
-                            st.info("Next Step: Waiting for employee verification via email.")
-                        elif row['status'] == 'Pending Manager':
-                            st.warning("Action Required: Your approval is needed.")
-                        elif row['status'] == 'Pending Executive':
-                            st.info("Next Step: Waiting for executive approval.")
-                        elif row['status'] == 'Approved':
-                            st.success("Complete: This scorecard is fully approved!")
-                        else:
-                            st.error("Rejected: This scorecard was rejected and requires review.")
-
-                        # Resend email button
-                        if st.button(f"Resend approval email", key=f"resend_{row['response_id']}", help="Send the current approval email again"):
-                            stage = 'employee' if row['status'] == 'Pending Employee' else 'manager' if row['status'] == 'Pending Manager' else 'executive' if row['status'] == 'Pending Executive' else 'rejected'
-                            sent, recipient, preview = send_stage_email(row, stage)
-                            if sent:
-                                st.success(f"Email resent to {recipient}.")
-                            else:
-                                st.warning("SMTP not configured. Use the preview links below.")
-                                approve_link, reject_link = get_stage_links(row)
-                                st.markdown(f"Approve: {approve_link}")
-                                st.markdown(f"Reject: {reject_link}")
+                st.markdown("#### Details")
+                for _, row in manager_responses.iterrows():
+                    st.markdown(f"**{row.get('employee_name', 'Unknown Employee')}**")
+                    st.write(f"Status: {row.get('status', '')}")
+                    st.write(f"Score: {row.get('questions_score', '')}")
+                    st.write(f"No answers: {row.get('number_of_nos', '')}")
+                    st.write(f"Created: {row.get('created_at', '')}")
+                    st.write(f"Updated: {row.get('updated_at', '')}")
+                    st.divider()
     except Exception as e:
         st.error(f"Error loading scorecard status: {e}")
         import traceback
