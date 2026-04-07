@@ -670,12 +670,17 @@ if debug_mode:
     manager_employees = st.session_state.employees_df  # Show all employees in debug mode
 else:
     manager_employees = st.session_state.employees_df[st.session_state.employees_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-    if manager_employees.empty:
-        st.warning("No employees found for this manager email.")
-        st.stop()
 
 responses_df = load_responses()
 responses_df['employee_id'] = responses_df['employee_id'].astype(str)
+
+# Check if manager has any records in the system
+manager_has_responses = not responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email].empty if not debug_mode else True
+
+if not debug_mode and manager_employees.empty and not manager_has_responses:
+    st.warning("⚠️ Manager email not found in the Employees sheet.")
+    st.info("You can still view scorecard statuses for any scorecards you've submitted.")
+    # Continue instead of stopping - allow access to status page
 
 st.subheader("📋 Manager Dashboard")
 
@@ -683,6 +688,14 @@ tab_new, tab_status = st.tabs(["Submit Scorecard", "Scorecard Status"])
 
 with tab_new:
     st.markdown("### Submit a new balanced score card")
+    
+    if debug_mode and manager_employees.empty:
+        st.info("🔧 DEBUG MODE: No employees found matching current filters.")
+        st.stop()
+    elif not debug_mode and manager_employees.empty:
+        st.info("📋 You don't have any employees assigned as a manager in the system.")
+        st.info("However, you can still view the status of any scorecards you've submitted using the 'Scorecard Status' tab below.")
+        st.stop()
     
     # Filter out employees that have already been reviewed
     reviewed_employee_ids = set()
