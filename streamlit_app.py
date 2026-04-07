@@ -23,6 +23,15 @@ st.set_page_config(
 # Minimal CSS to avoid breaking Streamlit's UI rendering
 custom_css = """
 <style>
+    :root {
+        --accent: #006b6b;
+        --accent-hover: #005050;
+        --tab-bg-light: #f2f8f8;
+        --tab-bg-dark: #1f2b2b;
+        --code-bg-light: #f0f0f0;
+        --code-bg-dark: #1a2026;
+    }
+
     .stApp {
         background: linear-gradient(180deg, #f7fbfb 0%, #ffffff 45%);
     }
@@ -34,6 +43,7 @@ custom_css = """
     [data-baseweb="tab"] {
         border-radius: 10px;
         padding: 0.5rem 0.9rem;
+        background: var(--tab-bg-light);
     }
 
     [data-testid="stMetricValue"] {
@@ -49,11 +59,11 @@ custom_css = """
     }
     
     .stButton>button:hover {
-        background-color: #005050;
+        background-color: var(--accent-hover);
     }
     
     code {
-        background-color: #f0f0f0;
+        background-color: var(--code-bg-light);
         border-radius: 4px;
         padding: 2px 4px;
     }
@@ -61,6 +71,34 @@ custom_css = """
     /* Expander styling only */
     .streamlit-expanderHeader {
         font-weight: bold;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .stApp {
+            background: linear-gradient(180deg, #0f1419 0%, #111827 45%);
+        }
+
+        [data-baseweb="tab"] {
+            background: var(--tab-bg-dark);
+            color: #e5edf3;
+        }
+
+        [data-baseweb="tab"][aria-selected="true"] {
+            border: 1px solid #2f4545;
+        }
+
+        [data-testid="stMetricValue"] {
+            color: #7ad6d6;
+        }
+
+        code {
+            background-color: var(--code-bg-dark);
+            color: #e8eef5;
+        }
+
+        .streamlit-expanderHeader {
+            color: #dce7f2;
+        }
     }
 </style>
 """
