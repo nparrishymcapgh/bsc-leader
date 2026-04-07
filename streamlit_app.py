@@ -9,6 +9,7 @@ import smtplib
 from email.message import EmailMessage
 from urllib.parse import urlencode
 import time
+from functools import lru_cache
 
 # ============================================================================
 # PAGE CONFIG
@@ -333,6 +334,7 @@ def get_spreadsheet():
         st.stop()
 
 @st.cache_data(ttl=3600)
+@lru_cache(maxsize=None)
 def load_sheet(tab_name):
     spreadsheet = get_spreadsheet()
     try:
@@ -346,6 +348,7 @@ def load_sheet(tab_name):
         return pd.DataFrame()
 
 @st.cache_data(ttl=60)
+@lru_cache(maxsize=None)
 def load_responses():
     spreadsheet = get_spreadsheet()
     worksheet = ensure_responses_sheet(spreadsheet)
@@ -808,6 +811,10 @@ action = query_params.get('action')
 response_id = query_params.get('response_id')
 token = query_params.get('token')
 debug_mode = query_params.get('debug') == 'connection'
+
+# Debug output for query parameters
+if action or response_id or token:
+    st.info(f"DEBUG: Query params - action: {action}, response_id: {response_id}, token: {token[:10] if token else None}...")
 
 if action and response_id and token:
     st.info("Processing approval link...")
