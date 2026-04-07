@@ -661,8 +661,13 @@ def send_stage_email(response, stage):
     else:
         recipient = response.get('manager_email', '')
 
-    success = send_email(subject, body, recipient)
-    return success, recipient, body
+    # Only send email if recipient is valid
+    if recipient and '@' in recipient:
+        success = send_email(subject, body, recipient)
+        return success, recipient, body
+    else:
+        # No valid recipient, return success=False but don't show error for missing executive emails
+        return False, recipient, body
 
 
 def process_action(action, response_id, token):
@@ -714,10 +719,12 @@ def process_action(action, response_id, token):
             updates['status'] = 'Rejected by Manager'
             stage_email = 'rejected'
         elif action == 'executive_approve' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
+            st.info(f"Executive approval: token match = {token == response.get('executive_token')}, executive_token = {response.get('executive_token', 'None')[:8]}...")
             valid = True
             updates['executive_agree'] = 'Yes'
             updates['executive_agree_ts'] = now
             updates['status'] = 'Approved'
+            # No stage_email for final approval
         elif action == 'executive_reject' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
             valid = True
             updates['executive_agree'] = 'No'
@@ -739,9 +746,12 @@ def process_action(action, response_id, token):
                 if sent:
                     st.info(f"Notification email sent to {recipient}.")
                 else:
-                    st.info("Email could not be sent. Please use the app URL or email preview instead.")
+                    if recipient and '@' in recipient:
+                        st.info("Email could not be sent. Please use the app URL or email preview instead.")
+                    else:
+                        st.info("No email recipient configured for this stage.")
         else:
-            st.error("Unable to update the response record.")
+            st.error("Unable to update the response record. Please try again or contact support.")
     except Exception as e:
         st.error(f"An error occurred while processing the approval: {e}")
         st.info("Please try again or contact support if the issue persists.")
