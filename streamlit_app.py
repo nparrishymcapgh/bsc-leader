@@ -23,17 +23,11 @@ st.set_page_config(
 # Minimal CSS to avoid breaking Streamlit's UI rendering
 custom_css = """
 <style>
-    :root {
-        --accent: #006b6b;
-        --accent-hover: #005050;
-        --tab-bg-light: #f2f8f8;
-        --tab-bg-dark: #1f2b2b;
-        --code-bg-light: #f0f0f0;
-        --code-bg-dark: #1a2026;
-    }
-
     .stApp {
-        background: linear-gradient(180deg, #f7fbfb 0%, #ffffff 45%);
+        background:
+            radial-gradient(1200px 400px at 15% -10%, color-mix(in srgb, var(--primary-color) 10%, transparent), transparent 60%),
+            radial-gradient(1000px 350px at 90% 0%, color-mix(in srgb, var(--primary-color) 8%, transparent), transparent 55%),
+            var(--background-color);
     }
 
     [data-baseweb="tab-list"] {
@@ -43,27 +37,33 @@ custom_css = """
     [data-baseweb="tab"] {
         border-radius: 10px;
         padding: 0.5rem 0.9rem;
-        background: var(--tab-bg-light);
+        background: color-mix(in srgb, var(--secondary-background-color) 88%, var(--background-color));
+        border: 1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+    }
+
+    [data-baseweb="tab"][aria-selected="true"] {
+        border-color: color-mix(in srgb, var(--primary-color) 45%, transparent);
     }
 
     [data-testid="stMetricValue"] {
-        color: #0d5252;
+        color: var(--primary-color);
     }
 
     .stButton>button {
-        background-color: #006B6B;
-        color: white;
+        background-color: var(--primary-color);
+        color: var(--background-color);
         border: none;
         border-radius: 8px;
         font-weight: 500;
     }
     
     .stButton>button:hover {
-        background-color: var(--accent-hover);
+        filter: brightness(0.92);
     }
     
     code {
-        background-color: var(--code-bg-light);
+        background-color: color-mix(in srgb, var(--secondary-background-color) 92%, var(--background-color));
+        color: var(--text-color);
         border-radius: 4px;
         padding: 2px 4px;
     }
@@ -71,34 +71,7 @@ custom_css = """
     /* Expander styling only */
     .streamlit-expanderHeader {
         font-weight: bold;
-    }
-
-    @media (prefers-color-scheme: dark) {
-        .stApp {
-            background: linear-gradient(180deg, #0f1419 0%, #111827 45%);
-        }
-
-        [data-baseweb="tab"] {
-            background: var(--tab-bg-dark);
-            color: #e5edf3;
-        }
-
-        [data-baseweb="tab"][aria-selected="true"] {
-            border: 1px solid #2f4545;
-        }
-
-        [data-testid="stMetricValue"] {
-            color: #7ad6d6;
-        }
-
-        code {
-            background-color: var(--code-bg-dark);
-            color: #e8eef5;
-        }
-
-        .streamlit-expanderHeader {
-            color: #dce7f2;
-        }
+        color: var(--text-color);
     }
 </style>
 """
