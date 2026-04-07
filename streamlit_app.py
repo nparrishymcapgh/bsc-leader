@@ -740,33 +740,9 @@ if "gcp_service_account" not in st.secrets:
     st.stop()
 
 query_params = st.query_params
-action = query_params.get('action', [None])[0]
-response_id = query_params.get('response_id', [None])[0]
-token = query_params.get('token', [None])[0]
-debug = query_params.get('debug', [None])[0]
-
-# Debug endpoint
-if debug == 'connection':
-    st.title("🔍 Connection Debug")
-    try:
-        spreadsheet = get_spreadsheet()
-        st.success("✅ Google Sheets connection successful")
-        worksheets = spreadsheet.worksheets()
-        st.info(f"Found {len(worksheets)} worksheets: {[ws.title for ws in worksheets]}")
-
-        # Test responses sheet
-        try:
-            responses_df = load_responses()
-            st.success(f"✅ Responses sheet loaded: {len(responses_df)} records")
-            if not responses_df.empty:
-                st.info(f"Latest record: {responses_df.iloc[-1]['response_id']} - {responses_df.iloc[-1]['status']}")
-        except Exception as e:
-            st.error(f"❌ Error loading responses: {e}")
-
-    except Exception as e:
-        st.error(f"❌ Google Sheets connection failed: {e}")
-        st.info("Check your secrets configuration in Streamlit Cloud")
-    st.stop()
+action = query_params.get('action')
+response_id = query_params.get('response_id')
+token = query_params.get('token')
 
 if action and response_id and token:
     st.info("Processing approval link...")
@@ -964,56 +940,46 @@ with tab_status:
         else:
             manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
             for _, row in manager_responses.iterrows():
-                status_indicator = {
-                    'Pending Employee': '[EMP]',
-                    'Pending Manager': '[MGR]',
-                    'Pending Executive': '[EXEC]',
-                    'Approved': '[OK]',
-                    'Rejected by Employee': '[EMP NO]',
-                    'Rejected by Manager': '[MGR NO]',
-                    'Rejected by Executive': '[EXEC NO]'
-                }.get(row['status'], '[?]')
-
-                with st.expander(f"{status_indicator} {row['employee_name']} — {row['status']}"):
+                with st.expander(f"{row['employee_name']} — {row['status']}"):
                     # Create a cleaner layout with columns
                     col1, col2 = st.columns(2)
 
                     with col1:
-                        st.markdown("**📊 Scorecard Details:**")
-                        st.write(f"• **Score:** {row['questions_score']}/100")
-                        st.write(f"• **No answers:** {row['number_of_nos']}")
-                        st.write(f"• **Created:** {row['created_at']}")
-                        st.write(f"• **Last updated:** {row['updated_at']}")
+                        st.markdown("Scorecard Details:")
+                        st.write(f"Score: {row['questions_score']}/100")
+                        st.write(f"No answers: {row['number_of_nos']}")
+                        st.write(f"Created: {row['created_at']}")
+                        st.write(f"Last updated: {row['updated_at']}")
 
                     with col2:
-                        st.markdown("**👥 Approval Status:**")
-                        emp_status = "[YES]" if row['employee_agree'] == 'Yes' else "[NO]" if row['employee_agree'] == 'No' else "[WAIT]"
-                        st.write(f"• **Employee:** {emp_status}")
+                        st.markdown("Approval Status:")
+                        emp_status = "Yes" if row['employee_agree'] == 'Yes' else "No" if row['employee_agree'] == 'No' else "Pending"
+                        st.write(f"Employee: {emp_status}")
                         if row['employee_agree_ts']:
-                            st.write(f"  _{row['employee_agree_ts']}_")
+                            st.write(f"  {row['employee_agree_ts']}")
 
-                        mgr_status = "[YES]" if row['manager_agree'] == 'Yes' else "[NO]" if row['manager_agree'] == 'No' else "[WAIT]"
-                        st.write(f"• **Manager:** {mgr_status}")
+                        mgr_status = "Yes" if row['manager_agree'] == 'Yes' else "No" if row['manager_agree'] == 'No' else "Pending"
+                        st.write(f"Manager: {mgr_status}")
                         if row['manager_agree_ts']:
-                            st.write(f"  _{row['manager_agree_ts']}_")
+                            st.write(f"  {row['manager_agree_ts']}")
 
-                        exec_status = "[YES]" if row['executive_agree'] == 'Yes' else "[NO]" if row['executive_agree'] == 'No' else "[WAIT]"
-                        st.write(f"• **Executive:** {exec_status}")
+                        exec_status = "Yes" if row['executive_agree'] == 'Yes' else "No" if row['executive_agree'] == 'No' else "Pending"
+                        st.write(f"Executive: {exec_status}")
                         if row['executive_agree_ts']:
-                            st.write(f"  _{row['executive_agree_ts']}_")
+                            st.write(f"  {row['executive_agree_ts']}")
 
                     # Status message with better formatting
                     st.markdown("---")
                     if row['status'] == 'Pending Employee':
-                        st.info("**Next Step:** Waiting for employee verification via email.")
+                        st.info("Next Step: Waiting for employee verification via email.")
                     elif row['status'] == 'Pending Manager':
-                        st.warning("**Action Required:** Your approval is needed.")
+                        st.warning("Action Required: Your approval is needed.")
                     elif row['status'] == 'Pending Executive':
-                        st.info("**Next Step:** Waiting for executive approval.")
+                        st.info("Next Step: Waiting for executive approval.")
                     elif row['status'] == 'Approved':
-                        st.success("**Complete:** This scorecard is fully approved!")
+                        st.success("Complete: This scorecard is fully approved!")
                     else:
-                        st.error("**Rejected:** This scorecard was rejected and requires review.")
+                        st.error("Rejected: This scorecard was rejected and requires review.")
 
                     # Resend email button
                     if st.button(f"Resend approval email", key=f"resend_{row['response_id']}", help="Send the current approval email again"):
@@ -1024,5 +990,5 @@ with tab_status:
                         else:
                             st.warning("SMTP not configured. Use the preview links below.")
                             approve_link, reject_link = get_stage_links(row)
-                            st.markdown(f"**Approve:** {approve_link}")
-                            st.markdown(f"**Reject:** {reject_link}")
+                            st.markdown(f"Approve: {approve_link}")
+                            st.markdown(f"Reject: {reject_link}")
