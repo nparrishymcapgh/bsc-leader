@@ -512,44 +512,64 @@ def find_response_by_id(response_id):
 
 
 def update_response(response_id, updates):
-    spreadsheet = get_spreadsheet()
-    worksheet = ensure_responses_sheet(spreadsheet)
-    records = worksheet.get_all_records()
-    df = pd.DataFrame(records)
-    # Ensure all expected columns exist
-    expected_columns = [
-        "response_id", "created_at", "updated_at", "manager_email", "manager_name",
-        "employee_id", "employee_name", "employee_email", "branch", "dept",
-        "job_title", "executive_email", "questions_score", "number_of_nos",
-        "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
-        "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
-        "status", "employee_token", "manager_token", "executive_token"
-    ]
-    for col in expected_columns:
-        if col not in df.columns:
-            df[col] = ""
-    
-    if df.empty:
+    try:
+        spreadsheet = get_spreadsheet()
+        worksheet = ensure_responses_sheet(spreadsheet)
+        records = worksheet.get_all_records()
+        df = pd.DataFrame(records)
+        # Ensure all expected columns exist
+        expected_columns = [
+            "response_id", "created_at", "updated_at", "manager_email", "manager_name",
+            "employee_id", "employee_name", "employee_email", "branch", "dept",
+            "job_title", "executive_email", "questions_score", "number_of_nos",
+            "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
+            "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
+            "status", "employee_token", "manager_token", "executive_token"
+        ]
+        for col in expected_columns:
+            if col not in df.columns:
+                df[col] = ""
+        
+        if df.empty:
+            print(f"DEBUG: update_response - No records found")
+            return False
+
+        match = df[df['response_id'] == response_id]
+        if match.empty:
+            print(f"DEBUG: update_response - No match found for response_id: {response_id}")
+            return False
+
+        row_index = match.index[0] + 2
+        header = worksheet.row_values(1)
+        row_values = worksheet.row_values(row_index)
+        row_data = {header[i]: row_values[i] if i < len(row_values) else "" for i in range(len(header))}
+
+        print(f"DEBUG: update_response - Before update: status = {row_data.get('status', 'N/A')}")
+        
+        for key, value in updates.items():
+            if key not in header:
+                header.append(key)
+                row_data[key] = value
+            print(f"DEBUG: update_response - Updating {key} = {value}")
+
+        ordered_row = [row_data.get(col, "") for col in header]
+        worksheet.update(f"A{row_index}:{chr(64 + len(header))}{row_index}", [ordered_row])
+        load_responses.clear()
+        
+        # Verify the update
+        records_after = worksheet.get_all_records()
+        df_after = pd.DataFrame(records_after)
+        match_after = df_after[df_after['response_id'] == response_id]
+        if not match_after.empty:
+            new_status = match_after.iloc[0].get('status', 'N/A')
+            print(f"DEBUG: update_response - After update: status = {new_status}")
+        
+        return True
+    except Exception as e:
+        print(f"DEBUG: update_response - Error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-
-    match = df[df['response_id'] == response_id]
-    if match.empty:
-        return False
-
-    row_index = match.index[0] + 2
-    header = worksheet.row_values(1)
-    row_values = worksheet.row_values(row_index)
-    row_data = {header[i]: row_values[i] if i < len(row_values) else "" for i in range(len(header))}
-
-    for key, value in updates.items():
-        if key not in header:
-            header.append(key)
-            row_data[key] = value
-
-    ordered_row = [row_data.get(col, "") for col in header]
-    worksheet.update(f"A{row_index}:{chr(64 + len(header))}{row_index}", [ordered_row])
-    load_responses.clear()
-    return True
 
 
 def append_response(row):
@@ -718,8 +738,8 @@ def process_action(action, response_id, token):
             updates['manager_agree_ts'] = now
             updates['status'] = 'Rejected by Manager'
             stage_email = 'rejected'
-        elif action == 'executive_approve' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
-            st.info(f"Executive approval: token match = {token == response.get('executive_token')}, executive_token = {response.get('executive_token', 'None')[:8]}...")
+        elif action == 'executive_approve' and token == response.get('executive_token'):
+            st.info(f"Executive approval: token match = {token == response.get('executive_token')}, current status = {response['status']}")
             valid = True
             updates['executive_agree'] = 'Yes'
             updates['executive_agree_ts'] = now
@@ -978,10 +998,15 @@ with tab_new:
 
 with tab_status:
     st.markdown("### Your scorecard status dashboard")
+    st.write(f"Debug: responses_df shape = {responses_df.shape}")
+    st.write(f"Debug: manager_email = {st.session_state.manager_email}")
+    
     if responses_df.empty:
         st.info("No scorecards submitted yet.")
     else:
         manager_responses = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+        st.write(f"Debug: manager_responses shape = {manager_responses.shape}")
+        
         if manager_responses.empty:
             st.info("No scorecards found for your manager email.")
         else:
