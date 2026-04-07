@@ -20,9 +20,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Global debug variables
-load_responses_debug = []
-
 # Minimal CSS to avoid breaking Streamlit's UI rendering
 custom_css = """
 <style>
@@ -117,24 +114,33 @@ def load_sheet(tab_name):
         st.error(f"Unable to load `{tab_name}` sheet: {exc}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=60)
-@lru_cache(maxsize=None)
 def load_responses():
-    global load_responses_debug
+    """Load responses with explicit error visibility"""
     debug_messages = []
-    debug_messages.append("DEBUG: load_responses() called")
+    debug_messages.append("✓ load_responses() called")
+    
     try:
+        # Get connection
         spreadsheet = get_spreadsheet()
-        debug_messages.append(f"DEBUG: Got spreadsheet: {spreadsheet.title if spreadsheet else 'None'}")
+        debug_messages.append(f"✓ Connected to sheet: {spreadsheet.title}")
+        
+        # Get worksheet
         worksheet = ensure_responses_sheet(spreadsheet)
-        debug_messages.append(f"DEBUG: Got worksheet: {worksheet.title if worksheet else 'None'}")
+        debug_messages.append(f"✓ Got worksheet: {worksheet.title}")
+        
+        # Load data
         records = worksheet.get_all_records()
-        debug_messages.append(f"DEBUG: worksheet.get_all_records() returned {len(records)} records")
+        debug_messages.append(f"✓ Loaded {len(records)} records from sheet")
+        
+        # Show columns
         if records:
-            debug_messages.append(f"DEBUG: First record keys: {list(records[0].keys()) if records else 'None'}")
+            debug_messages.append(f"✓ Columns: {', '.join(list(records[0].keys())[:5])}... ({len(records[0])} total)")
+        
+        # Create DataFrame
         df = pd.DataFrame(records)
-        debug_messages.append(f"DEBUG: DataFrame shape after creation: {df.shape}")
-        # Ensure all expected columns exist, even if sheet is empty
+        debug_messages.append(f"✓ DataFrame created: shape {df.shape}")
+        
+        # Ensure all expected columns exist
         expected_columns = [
             "response_id", "created_at", "updated_at", "manager_email", "manager_name",
             "employee_id", "employee_name", "employee_email", "branch", "dept",
@@ -143,21 +149,29 @@ def load_responses():
             "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
             "status", "employee_token", "manager_token", "executive_token"
         ]
+        
         for col in expected_columns:
             if col not in df.columns:
                 df[col] = ""
-        debug_messages.append(f"DEBUG: Final DataFrame shape: {df.shape}")
         
-        # Store debug messages in a global variable that can be accessed by the UI
-        load_responses_debug = debug_messages
+        debug_messages.append(f"✓ SUCCESS: Returning {len(df)} responses")
+        
+        # Store debug messages
+        st.session_state.load_responses_debug_list = debug_messages
         
         return df
-    except Exception as e:
-        debug_messages.append(f"DEBUG: load_responses() error: {e}")
-        import traceback
-        debug_messages.append(f"DEBUG: Traceback: {traceback.format_exc()}")
         
-        load_responses_debug = debug_messages
+    except Exception as e:
+        error_msg = f"✗ ERROR in load_responses: {str(e)}"
+        debug_messages.append(error_msg)
+        import traceback
+        debug_messages.append(traceback.format_exc())
+        
+        st.session_state.load_responses_debug_list = debug_messages
+        
+        # SHOW THE ERROR PROMINENTLY
+        st.error("ERROR: Could not load responses from sheet!")
+        st.error(error_msg)
         
         return pd.DataFrame()
 
@@ -279,8 +293,6 @@ def format_email_body(subject, employee, question_rows, answers, stage, approve_
 # ============================================================================
 
 def find_response_by_id(response_id):
-    # Clear cache to ensure fresh data
-    load_responses.clear()
     spreadsheet = get_spreadsheet()
     worksheet = ensure_responses_sheet(spreadsheet)
     records = worksheet.get_all_records()
@@ -359,8 +371,6 @@ def update_response(response_id, updates):
         update_range = f"A{row_index}:{chr(64 + len(header))}{row_index}"
         print(f"DEBUG: update_response - Updating range: {update_range}")
         worksheet.update(update_range, [ordered_row])
-        load_responses.clear()
-        load_sheet.clear()  # Clear sheet cache in case columns were added
         
         # Verify the update
         records_after = worksheet.get_all_records()
@@ -384,8 +394,6 @@ def append_response(row):
     header = worksheet.row_values(1)
     ordered_row = [row.get(col, "") for col in header]
     worksheet.append_row(ordered_row)
-    load_responses.clear()
-    load_sheet.clear()  # Clear sheet cache when new data is added
 
 
 def create_response_entry(manager, employee, answers, comment=""):
@@ -855,16 +863,17 @@ with tab_status:
     try:
         st.markdown("### Your scorecard status dashboard")
         
-        # Show debug information
-        if 'load_responses_debug' in globals() and load_responses_debug:
+        # Always load fresh data for the status page
+        current_responses_df = load_responses()
+        
+        # Show debug information from session state
+        if 'load_responses_debug_list' in st.session_state and st.session_state.load_responses_debug_list:
             with st.expander("🔧 Debug Information", expanded=True):
                 st.markdown("**Data Loading Debug:**")
-                for msg in load_responses_debug:
+                for msg in st.session_state.load_responses_debug_list:
                     st.code(msg)
                 st.markdown("---")
         
-        # Always load fresh data for the status page
-        current_responses_df = load_responses()
         st.write(f"Debug: responses_df shape = {current_responses_df.shape}")
         st.write(f"Debug: manager_email = {st.session_state.manager_email}")
         
