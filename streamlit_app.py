@@ -351,25 +351,36 @@ def load_sheet(tab_name):
 @lru_cache(maxsize=None)
 def load_responses():
     print("DEBUG: load_responses() called")
-    spreadsheet = get_spreadsheet()
-    worksheet = ensure_responses_sheet(spreadsheet)
-    records = worksheet.get_all_records()
-    df = pd.DataFrame(records)
-    print(f"DEBUG: load_responses() - got {len(records)} records from sheet")
-    # Ensure all expected columns exist, even if sheet is empty
-    expected_columns = [
-        "response_id", "created_at", "updated_at", "manager_email", "manager_name",
-        "employee_id", "employee_name", "employee_email", "branch", "dept",
-        "job_title", "executive_email", "questions_score", "number_of_nos",
-        "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
-        "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
-        "status", "employee_token", "manager_token", "executive_token"
-    ]
-    for col in expected_columns:
-        if col not in df.columns:
-            df[col] = ""
-    print(f"DEBUG: load_responses() - returning df with shape {df.shape}")
-    return df
+    try:
+        spreadsheet = get_spreadsheet()
+        print(f"DEBUG: Got spreadsheet: {spreadsheet.title if spreadsheet else 'None'}")
+        worksheet = ensure_responses_sheet(spreadsheet)
+        print(f"DEBUG: Got worksheet: {worksheet.title if worksheet else 'None'}")
+        records = worksheet.get_all_records()
+        print(f"DEBUG: worksheet.get_all_records() returned {len(records)} records")
+        if records:
+            print(f"DEBUG: First record keys: {list(records[0].keys()) if records else 'None'}")
+        df = pd.DataFrame(records)
+        print(f"DEBUG: DataFrame shape after creation: {df.shape}")
+        # Ensure all expected columns exist, even if sheet is empty
+        expected_columns = [
+            "response_id", "created_at", "updated_at", "manager_email", "manager_name",
+            "employee_id", "employee_name", "employee_email", "branch", "dept",
+            "job_title", "executive_email", "questions_score", "number_of_nos",
+            "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
+            "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
+            "status", "employee_token", "manager_token", "executive_token"
+        ]
+        for col in expected_columns:
+            if col not in df.columns:
+                df[col] = ""
+        print(f"DEBUG: Final DataFrame shape: {df.shape}")
+        return df
+    except Exception as e:
+        print(f"DEBUG: load_responses() error: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
 
 def ensure_responses_sheet(spreadsheet):
     headers = [
