@@ -707,168 +707,171 @@ tab_new, tab_status = st.tabs(["Submit Scorecard", "Scorecard Status"])
 
 with tab_new:
     st.markdown("### Submit a new balanced score card")
-    
+    can_submit = True
+
     if debug_mode and manager_employees.empty:
         st.info("🔧 DEBUG MODE: No employees found matching current filters.")
-        st.stop()
+        can_submit = False
     elif not debug_mode and manager_employees.empty:
         st.info("📋 You don't have any employees assigned as a manager in the system.")
-        st.info("However, you can still view the status of any scorecards you've submitted using the 'Scorecard Status' tab below.")
-        st.stop()
-    
-    # Filter out employees that have already been reviewed
-    reviewed_employee_ids = set()
-    if not responses_df.empty:
+        st.info("However, you can still view the status of any scorecards you've submitted using the 'Scorecard Status' tab.")
+        can_submit = False
+
+    if can_submit:
+        # Filter out employees that have already been reviewed
+        reviewed_employee_ids = set()
+        if not responses_df.empty:
+            if debug_mode:
+                # In debug mode, don't filter by manager - show all submissions
+                reviewed_employee_ids = set(responses_df['employee_id'].astype(str).unique())
+            else:
+                manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+                reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
+
         if debug_mode:
-            # In debug mode, don't filter by manager - show all submissions
-            reviewed_employee_ids = set(responses_df['employee_id'].astype(str).unique())
+            # In debug mode, show all employees
+            available_employees = st.session_state.employees_df[~st.session_state.employees_df['ID'].astype(str).isin(reviewed_employee_ids)]
+            st.info("🔧 DEBUG MODE: Showing all employees (not filtered by manager)")
         else:
-            manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-            reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
-    
-    if debug_mode:
-        # In debug mode, show all employees
-        available_employees = st.session_state.employees_df[~st.session_state.employees_df['ID'].astype(str).isin(reviewed_employee_ids)]
-        st.info("🔧 DEBUG MODE: Showing all employees (not filtered by manager)")
-    else:
-        available_employees = manager_employees[~manager_employees['ID'].astype(str).isin(reviewed_employee_ids)]
-    
-    if available_employees.empty:
-        if debug_mode:
-            st.success("🎉 **All employees in the system have been reviewed!**")
+            available_employees = manager_employees[~manager_employees['ID'].astype(str).isin(reviewed_employee_ids)]
+
+        if available_employees.empty:
+            if debug_mode:
+                st.success("🎉 **All employees in the system have been reviewed!**")
+            else:
+                st.success("🎉 **All employees under your supervision have been reviewed!**")
+            st.info("You have successfully completed performance reviews for all your direct reports.")
+            can_submit = False
+
+    if can_submit:
+        selected_employee_id = st.selectbox(
+            "Select employee to rate",
+            available_employees['ID'].astype(str).tolist(),
+            format_func=lambda eid: f"{available_employees[available_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
+        )
+        selected_employee = available_employees[available_employees['ID'].astype(str) == selected_employee_id].iloc[0]
+        st.write(f"Employee: {selected_employee['name']} | Branch: {selected_employee.get('branch', '')} | Dept: {selected_employee.get('dept', '')}")
+        st.write(f"Title: {selected_employee.get('job_title', '')} | Executive: {selected_employee.get('executive_email', '')}")
+        st.divider()
+
+        questions_df = st.session_state.questions_df
+        if questions_df.empty:
+            st.warning("The Questions sheet is empty. Please add questions to the Google Sheet.")
         else:
-            st.success("🎉 **All employees under your supervision have been reviewed!**")
-        st.info("You have successfully completed performance reviews for all your direct reports.")
-        st.stop()
-    
-    selected_employee_id = st.selectbox(
-        "Select employee to rate",
-        available_employees['ID'].astype(str).tolist(),
-        format_func=lambda eid: f"{available_employees[available_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
-    )
-    selected_employee = available_employees[available_employees['ID'].astype(str) == selected_employee_id].iloc[0]
-    st.write(f"Employee: {selected_employee['name']} | Branch: {selected_employee.get('branch', '')} | Dept: {selected_employee.get('dept', '')}")
-    st.write(f"Title: {selected_employee.get('job_title', '')} | Executive: {selected_employee.get('executive_email', '')}")
-    st.divider()
+            questions_df = questions_df.fillna("")
+            sections = questions_df['question_section'].astype(str).fillna('General').unique().tolist()
+            answers = {}
 
-    questions_df = st.session_state.questions_df
-    if questions_df.empty:
-        st.warning("The Questions sheet is empty. Please add questions to the Google Sheet.")
-    else:
-        questions_df = questions_df.fillna("")
-        sections = questions_df['question_section'].astype(str).fillna('General').unique().tolist()
-        answers = {}
+            # Live score calculation
+            score_questions = questions_df[questions_df['type'].astype(str).str.strip().str.lower() == 'score']
+            total_score_questions = len(score_questions)
 
-        # Live score calculation
-        score_questions = questions_df[questions_df['type'].astype(str).str.strip().str.lower() == 'score']
-        total_score_questions = len(score_questions)
+            for section in sections:
+                section_rows = questions_df[questions_df['question_section'].astype(str) == section]
+                header_text = section_rows['header'].astype(str).fillna('').iloc[0]
+                if header_text:
+                    st.markdown(f"### {header_text}")
+                for _, question in section_rows.iterrows():
+                    key = f"q_{selected_employee_id}_{question['ID']}"
+                    if str(question['type']).strip().lower() == 'score':
+                        answers[str(question['ID'])] = st.radio(
+                            question['question'],
+                            options=['1', '2', '3'],
+                            key=key,
+                            index=0
+                        )
+                    else:
+                        answers[str(question['ID'])] = st.radio(
+                            question['question'],
+                            options=['Yes', 'No'],
+                            key=key,
+                            index=0
+                        )
+                st.divider()
 
-        for section in sections:
-            section_rows = questions_df[questions_df['question_section'].astype(str) == section]
-            header_text = section_rows['header'].astype(str).fillna('').iloc[0]
-            if header_text:
-                st.markdown(f"### {header_text}")
-            for _, question in section_rows.iterrows():
-                key = f"q_{selected_employee_id}_{question['ID']}"
-                if str(question['type']).strip().lower() == 'score':
-                    answers[str(question['ID'])] = st.radio(
-                        question['question'],
-                        options=['1', '2', '3'],
-                        key=key,
-                        index=0
-                    )
-                else:
-                    answers[str(question['ID'])] = st.radio(
-                        question['question'],
-                        options=['Yes', 'No'],
-                        key=key,
-                        index=0
-                    )
+            # Calculate and display current score
+            answered_score_questions = [qid for qid, val in answers.items() if val in ['1', '2', '3']]
+            current_score = 0
+            if answered_score_questions:
+                score_values = [int(answers[qid]) for qid in answered_score_questions]
+                current_score = int(round(sum(score_values) / len(score_values) * 100)) if score_values else 0
+
+            # Count "No" answers
+            no_answers = sum(1 for qid, val in answers.items() if val == 'No')
+
+            # Display current progress
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Current Score", f"{current_score}/100")
+            with col2:
+                answered = len([v for v in answers.values() if v not in [None, '']])
+                total_questions = len(questions_df)
+                st.metric("Questions Answered", f"{answered}/{total_questions}")
+            with col3:
+                st.metric("No Answers", no_answers)
+
             st.divider()
 
-        # Calculate and display current score
-        answered_score_questions = [qid for qid, val in answers.items() if val in ['1', '2', '3']]
-        current_score = 0
-        if answered_score_questions:
-            score_values = [int(answers[qid]) for qid in answered_score_questions]
-            current_score = int(round(sum(score_values) / len(score_values) * 100)) if score_values else 0
+            # Comment field
+            st.markdown("### 📝 Additional Comments (Optional)")
+            manager_comment = st.text_area(
+                "Add any additional comments or notes about this employee:",
+                height=100,
+                placeholder="Enter your comments here...",
+                help="These comments will be included in the email sent to the employee but won't affect the score."
+            )
 
-        # Count "No" answers
-        no_answers = sum(1 for qid, val in answers.items() if val == 'No')
+            st.divider()
 
-        # Display current progress
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Current Score", f"{current_score}/100")
-        with col2:
-            answered = len([v for v in answers.values() if v not in [None, '']])
-            total_questions = len(questions_df)
-            st.metric("Questions Answered", f"{answered}/{total_questions}")
-        with col3:
-            st.metric("No Answers", no_answers)
-
-        st.divider()
-
-        # Comment field
-        st.markdown("### 📝 Additional Comments (Optional)")
-        manager_comment = st.text_area(
-            "Add any additional comments or notes about this employee:",
-            height=100,
-            placeholder="Enter your comments here...",
-            help="These comments will be included in the email sent to the employee but won't affect the score."
-        )
-
-        st.divider()
-
-        if st.button("Submit Scorecard", type='primary'):
-            missing = [qid for qid, value in answers.items() if value in [None, '']]
-            if missing:
-                st.error("Please answer every question before submitting.")
-            else:
-                # Create success message
-                manager_row = manager_employees.iloc[0]
-                response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
-
-                # Submit the response
-                append_response(response_entry)
-
-                # Send email
-                stage_email = 'employee'
-                sent, recipient, preview = send_stage_email(response_entry, stage_email)
-
-                # Success feedback
-                st.success("**Scorecard Submitted Successfully!**")
-                st.info(f"Verification email sent to employee: **{recipient}**")
-
-                # Check if there are more employees to review
-                reviewed_employee_ids = set()
-                if not responses_df.empty:
-                    manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-                    reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
-
-                remaining_employees = []
-                for _, emp in manager_employees.iterrows():
-                    if str(emp['ID']) not in reviewed_employee_ids:
-                        remaining_employees.append(f"{emp['name']} ({emp['ID']})")
-
-                if remaining_employees:
-                    st.warning(f"**{len(remaining_employees)} employees still need review:**")
-                    for emp in remaining_employees[:3]:  # Show first 3
-                        st.write(f"• {emp}")
-                    if len(remaining_employees) > 3:
-                        st.write(f"• ... and {len(remaining_employees) - 3} more")
+            if st.button("Submit Scorecard", type='primary'):
+                missing = [qid for qid, value in answers.items() if value in [None, '']]
+                if missing:
+                    st.error("Please answer every question before submitting.")
                 else:
-                    st.success("🎉 **All employees under your supervision have been reviewed!**")
+                    # Create success message
+                    manager_row = manager_employees.iloc[0]
+                    response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
 
-                if not sent:
-                    st.warning("**Email not configured** - Copy approval links below and send manually:")
-                    approve_link, reject_link = get_stage_links(response_entry)
-                    st.code(f"Approve: {approve_link}")
-                    st.code(f"Reject: {reject_link}")
+                    # Submit the response
+                    append_response(response_entry)
 
-                # Auto-refresh after 3 seconds to show updated status
-                time.sleep(3)
-                st.rerun()
+                    # Send email
+                    stage_email = 'employee'
+                    sent, recipient, preview = send_stage_email(response_entry, stage_email)
+
+                    # Success feedback
+                    st.success("**Scorecard Submitted Successfully!**")
+                    st.info(f"Verification email sent to employee: **{recipient}**")
+
+                    # Check if there are more employees to review
+                    reviewed_employee_ids = set()
+                    if not responses_df.empty:
+                        manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+                        reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
+
+                    remaining_employees = []
+                    for _, emp in manager_employees.iterrows():
+                        if str(emp['ID']) not in reviewed_employee_ids:
+                            remaining_employees.append(f"{emp['name']} ({emp['ID']})")
+
+                    if remaining_employees:
+                        st.warning(f"**{len(remaining_employees)} employees still need review:**")
+                        for emp in remaining_employees[:3]:  # Show first 3
+                            st.write(f"• {emp}")
+                        if len(remaining_employees) > 3:
+                            st.write(f"• ... and {len(remaining_employees) - 3} more")
+                    else:
+                        st.success("🎉 **All employees under your supervision have been reviewed!**")
+
+                    if not sent:
+                        st.warning("**Email not configured** - Copy approval links below and send manually:")
+                        approve_link, reject_link = get_stage_links(response_entry)
+                        st.code(f"Approve: {approve_link}")
+                        st.code(f"Reject: {reject_link}")
+
+                    # Auto-refresh after 3 seconds to show updated status
+                    time.sleep(3)
+                    st.rerun()
 
 with tab_status:
     st.write("DEBUG: Status tab started")
