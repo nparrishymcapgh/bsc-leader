@@ -997,70 +997,75 @@ with tab_new:
                 st.rerun()
 
 with tab_status:
-    st.markdown("### Your scorecard status dashboard")
-    st.write(f"Debug: responses_df shape = {responses_df.shape}")
-    st.write(f"Debug: manager_email = {st.session_state.manager_email}")
-    
-    if responses_df.empty:
-        st.info("No scorecards submitted yet.")
-    else:
-        manager_responses = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-        st.write(f"Debug: manager_responses shape = {manager_responses.shape}")
+    try:
+        st.markdown("### Your scorecard status dashboard")
+        st.write(f"Debug: responses_df shape = {responses_df.shape}")
+        st.write(f"Debug: manager_email = {st.session_state.manager_email}")
         
-        if manager_responses.empty:
-            st.info("No scorecards found for your manager email.")
+        if responses_df.empty:
+            st.info("No scorecards submitted yet.")
         else:
-            manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
-            for _, row in manager_responses.iterrows():
-                with st.expander(f"{row['employee_name']} — {row['status']}"):
-                    # Create a cleaner layout with columns
-                    col1, col2 = st.columns(2)
+            manager_responses = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+            st.write(f"Debug: manager_responses shape = {manager_responses.shape}")
+            
+            if manager_responses.empty:
+                st.info("No scorecards found for your manager email.")
+            else:
+                manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
+                for _, row in manager_responses.iterrows():
+                    with st.expander(f"{row['employee_name']} — {row['status']}"):
+                        # Create a cleaner layout with columns
+                        col1, col2 = st.columns(2)
 
-                    with col1:
-                        st.markdown("Scorecard Details:")
-                        st.write(f"Score: {row['questions_score']}/100")
-                        st.write(f"No answers: {row['number_of_nos']}")
-                        st.write(f"Created: {row['created_at']}")
-                        st.write(f"Last updated: {row['updated_at']}")
+                        with col1:
+                            st.markdown("Scorecard Details:")
+                            st.write(f"Score: {row['questions_score']}/100")
+                            st.write(f"No answers: {row['number_of_nos']}")
+                            st.write(f"Created: {row['created_at']}")
+                            st.write(f"Last updated: {row['updated_at']}")
 
-                    with col2:
-                        st.markdown("Approval Status:")
-                        emp_status = "Yes" if row['employee_agree'] == 'Yes' else "No" if row['employee_agree'] == 'No' else "Pending"
-                        st.write(f"Employee: {emp_status}")
-                        if row['employee_agree_ts']:
-                            st.write(f"  {row['employee_agree_ts']}")
+                        with col2:
+                            st.markdown("Approval Status:")
+                            emp_status = "Yes" if row['employee_agree'] == 'Yes' else "No" if row['employee_agree'] == 'No' else "Pending"
+                            st.write(f"Employee: {emp_status}")
+                            if row['employee_agree_ts']:
+                                st.write(f"  {row['employee_agree_ts']}")
 
-                        mgr_status = "Yes" if row['manager_agree'] == 'Yes' else "No" if row['manager_agree'] == 'No' else "Pending"
-                        st.write(f"Manager: {mgr_status}")
-                        if row['manager_agree_ts']:
-                            st.write(f"  {row['manager_agree_ts']}")
+                            mgr_status = "Yes" if row['manager_agree'] == 'Yes' else "No" if row['manager_agree'] == 'No' else "Pending"
+                            st.write(f"Manager: {mgr_status}")
+                            if row['manager_agree_ts']:
+                                st.write(f"  {row['manager_agree_ts']}")
 
-                        exec_status = "Yes" if row['executive_agree'] == 'Yes' else "No" if row['executive_agree'] == 'No' else "Pending"
-                        st.write(f"Executive: {exec_status}")
-                        if row['executive_agree_ts']:
-                            st.write(f"  {row['executive_agree_ts']}")
+                            exec_status = "Yes" if row['executive_agree'] == 'Yes' else "No" if row['executive_agree'] == 'No' else "Pending"
+                            st.write(f"Executive: {exec_status}")
+                            if row['executive_agree_ts']:
+                                st.write(f"  {row['executive_agree_ts']}")
 
-                    # Status message with better formatting
-                    st.markdown("---")
-                    if row['status'] == 'Pending Employee':
-                        st.info("Next Step: Waiting for employee verification via email.")
-                    elif row['status'] == 'Pending Manager':
-                        st.warning("Action Required: Your approval is needed.")
-                    elif row['status'] == 'Pending Executive':
-                        st.info("Next Step: Waiting for executive approval.")
-                    elif row['status'] == 'Approved':
-                        st.success("Complete: This scorecard is fully approved!")
-                    else:
-                        st.error("Rejected: This scorecard was rejected and requires review.")
-
-                    # Resend email button
-                    if st.button(f"Resend approval email", key=f"resend_{row['response_id']}", help="Send the current approval email again"):
-                        stage = 'employee' if row['status'] == 'Pending Employee' else 'manager' if row['status'] == 'Pending Manager' else 'executive' if row['status'] == 'Pending Executive' else 'rejected'
-                        sent, recipient, preview = send_stage_email(row, stage)
-                        if sent:
-                            st.success(f"Email resent to {recipient}.")
+                        # Status message with better formatting
+                        st.markdown("---")
+                        if row['status'] == 'Pending Employee':
+                            st.info("Next Step: Waiting for employee verification via email.")
+                        elif row['status'] == 'Pending Manager':
+                            st.warning("Action Required: Your approval is needed.")
+                        elif row['status'] == 'Pending Executive':
+                            st.info("Next Step: Waiting for executive approval.")
+                        elif row['status'] == 'Approved':
+                            st.success("Complete: This scorecard is fully approved!")
                         else:
-                            st.warning("SMTP not configured. Use the preview links below.")
-                            approve_link, reject_link = get_stage_links(row)
-                            st.markdown(f"Approve: {approve_link}")
-                            st.markdown(f"Reject: {reject_link}")
+                            st.error("Rejected: This scorecard was rejected and requires review.")
+
+                        # Resend email button
+                        if st.button(f"Resend approval email", key=f"resend_{row['response_id']}", help="Send the current approval email again"):
+                            stage = 'employee' if row['status'] == 'Pending Employee' else 'manager' if row['status'] == 'Pending Manager' else 'executive' if row['status'] == 'Pending Executive' else 'rejected'
+                            sent, recipient, preview = send_stage_email(row, stage)
+                            if sent:
+                                st.success(f"Email resent to {recipient}.")
+                            else:
+                                st.warning("SMTP not configured. Use the preview links below.")
+                                approve_link, reject_link = get_stage_links(row)
+                                st.markdown(f"Approve: {approve_link}")
+                                st.markdown(f"Reject: {reject_link}")
+    except Exception as e:
+        st.error(f"Error loading scorecard status: {e}")
+        import traceback
+        st.code(traceback.format_exc())
