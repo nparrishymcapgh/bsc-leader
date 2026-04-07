@@ -547,17 +547,27 @@ def update_response(response_id, updates):
         row_values = worksheet.row_values(row_index)
         row_data = {header[i]: row_values[i] if i < len(row_values) else "" for i in range(len(header))}
 
+        print(f"DEBUG: update_response - row_index: {row_index}, header length: {len(header)}, row_values length: {len(row_values)}")
         print(f"DEBUG: update_response - Before update: status = {row_data.get('status', 'N/A')}")
         
         for key, value in updates.items():
             if key not in header:
+                print(f"DEBUG: update_response - Adding new column: {key}")
                 header.append(key)
+                # Update the worksheet header row with the new column
+                worksheet.update(f"{chr(64 + len(header))}{1}", [[key]])
                 row_data[key] = value
-            print(f"DEBUG: update_response - Updating {key} = {value}")
+            else:
+                print(f"DEBUG: update_response - Updating existing column: {key} = {value}")
+            row_data[key] = value
 
         ordered_row = [row_data.get(col, "") for col in header]
-        worksheet.update(f"A{row_index}:{chr(64 + len(header))}{row_index}", [ordered_row])
+        print(f"DEBUG: update_response - Final ordered_row length: {len(ordered_row)}, header length: {len(header)}")
+        update_range = f"A{row_index}:{chr(64 + len(header))}{row_index}"
+        print(f"DEBUG: update_response - Updating range: {update_range}")
+        worksheet.update(update_range, [ordered_row])
         load_responses.clear()
+        load_sheet.clear()  # Clear sheet cache in case columns were added
         
         # Verify the update
         records_after = worksheet.get_all_records()
@@ -582,6 +592,7 @@ def append_response(row):
     ordered_row = [row.get(col, "") for col in header]
     worksheet.append_row(ordered_row)
     load_responses.clear()
+    load_sheet.clear()  # Clear sheet cache when new data is added
 
 
 def create_response_entry(manager, employee, answers, comment=""):
