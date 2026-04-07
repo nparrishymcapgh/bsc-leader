@@ -704,7 +704,9 @@ def process_action(action, response_id, token):
 
         if not valid:
             st.error("This approval link is invalid or the action is not allowed.")
-            st.info(f"Action: {action}, Status: {response['status']}, Token match: {token == response.get(f'{action.split(\"_\")[0]}_token')}")
+            token_type = action.split('_')[0] + '_token'
+            token_match = token == response.get(token_type)
+            st.info(f"Action: {action}, Status: {response['status']}, Token match: {token_match}")
             return
 
         if update_response(response_id, updates):
