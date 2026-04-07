@@ -8,6 +8,7 @@ import uuid
 import smtplib
 from email.message import EmailMessage
 from urllib.parse import urlencode
+import time
 
 # ============================================================================
 # PAGE CONFIG
@@ -316,18 +317,18 @@ def get_spreadsheet():
         client = gspread.authorize(creds)
         return client.open_by_key(GOOGLE_SHEET_ID)
     except KeyError:
-        st.error("❌ Google service account credentials not found in secrets.")
+        st.error("Google service account credentials not found in secrets.")
         st.info("Please configure your `.streamlit/secrets.toml` file with the service account credentials.")
         st.stop()
     except PermissionError:
-        st.error("❌ Permission denied accessing Google Sheet.")
+        st.error("Permission denied accessing Google Sheet.")
         st.info("Make sure:")
         st.info("1. The service account email has been shared with the Google Sheet")
         st.info("2. The GOOGLE_SHEET_ID is correct")
         st.info("3. The service account has 'Editor' access to the sheet")
         st.stop()
     except Exception as e:
-        st.error(f"❌ Error connecting to Google Sheets: {e}")
+        st.error(f"Error connecting to Google Sheets: {e}")
         st.info("Please check your service account configuration and Google Sheet permissions.")
         st.stop()
 
@@ -355,7 +356,7 @@ def load_responses():
         "response_id", "created_at", "updated_at", "manager_email", "manager_name",
         "employee_id", "employee_name", "employee_email", "branch", "dept",
         "job_title", "executive_email", "questions_score", "number_of_nos",
-        "responses", "employee_agree", "manager_agree", "executive_agree",
+        "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
         "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
         "status", "employee_token", "manager_token", "executive_token"
     ]
@@ -381,6 +382,7 @@ def ensure_responses_sheet(spreadsheet):
         "questions_score",
         "number_of_nos",
         "responses",
+        "comments",
         "employee_agree",
         "manager_agree",
         "executive_agree",
@@ -455,7 +457,7 @@ def format_scorecard_summary(employee, question_rows, answers):
     return "".join(lines)
 
 
-def format_email_body(subject, employee, question_rows, answers, stage, approve_link, reject_link):
+def format_email_body(subject, employee, question_rows, answers, stage, approve_link, reject_link, comment=""):
     score_answers = [int(v) for qid, v in answers.items() if v in ["1", "2", "3"]]
     questions_score = int(round(sum(score_answers) / len(score_answers) * 100)) if score_answers else 0
     number_of_nos = sum(1 for qid, v in answers.items() if v == "No")
@@ -464,6 +466,10 @@ def format_email_body(subject, employee, question_rows, answers, stage, approve_
     html.append(format_scorecard_summary(employee, question_rows, answers))
     html.append(f"<p><strong>Score:</strong> {questions_score}</p>")
     html.append(f"<p><strong>Number of No answers:</strong> {number_of_nos}</p>")
+
+    if comment.strip():
+        html.append(f"<p><strong>Manager Comments:</strong></p><blockquote style='border-left: 4px solid #006B6B; padding-left: 10px; margin: 10px 0; font-style: italic;'>{comment.strip()}</blockquote>")
+
     html.append("<p>Please approve or reject using the links below.</p>")
     if approve_link:
         html.append(f"<p><a href=\"{approve_link}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Approve</a></p>")
@@ -524,7 +530,7 @@ def append_response(row):
     load_responses.clear()
 
 
-def create_response_entry(manager, employee, answers):
+def create_response_entry(manager, employee, answers, comment=""):
     score_answers = [int(v) for qid, v in answers.items() if v in ["1", "2", "3"]]
     questions_score = int(round(sum(score_answers) / len(score_answers) * 100)) if score_answers else 0
     number_of_nos = sum(1 for qid, v in answers.items() if v == "No")
@@ -545,6 +551,7 @@ def create_response_entry(manager, employee, answers):
         "questions_score": questions_score,
         "number_of_nos": number_of_nos,
         "responses": json.dumps(answers),
+        "comments": comment.strip(),
         "employee_agree": "",
         "manager_agree": "",
         "executive_agree": "",
@@ -611,7 +618,7 @@ def send_stage_email(response, stage):
         'job_title': response.get('job_title', '')
     }
     
-    body = format_email_body(subject, employee, questions_for_email, answers, stage, approve_link, reject_link)
+    body = format_email_body(subject, employee, questions_for_email, answers, stage, approve_link, reject_link, response.get('comments', ''))
     recipient = ''
 
     if stage == 'employee':
@@ -697,7 +704,7 @@ st.title("Leader Level Balanced Score Card")
 
 # Check if secrets are configured
 if "gcp_service_account" not in st.secrets:
-    st.error("❌ Google service account credentials not configured.")
+    st.error("Google service account credentials not configured.")
     st.info("**Setup Required:**")
     st.info("1. Create a Google Cloud service account and download the JSON key")
     st.info("2. Share your Google Sheet with the service account email")
@@ -783,6 +790,11 @@ with tab_new:
         questions_df = questions_df.fillna("")
         sections = questions_df['question_section'].astype(str).fillna('General').unique().tolist()
         answers = {}
+
+        # Live score calculation
+        score_questions = questions_df[questions_df['type'].astype(str).str.strip().str.lower() == 'score']
+        total_score_questions = len(score_questions)
+
         for section in sections:
             section_rows = questions_df[questions_df['question_section'].astype(str) == section]
             header_text = section_rows['header'].astype(str).fillna('').iloc[0]
@@ -806,24 +818,88 @@ with tab_new:
                     )
             st.divider()
 
-        if st.button("Submit Draft", type='primary'):
+        # Calculate and display current score
+        answered_score_questions = [qid for qid, val in answers.items() if val in ['1', '2', '3']]
+        current_score = 0
+        if answered_score_questions:
+            score_values = [int(answers[qid]) for qid in answered_score_questions]
+            current_score = int(round(sum(score_values) / len(score_values) * 100)) if score_values else 0
+
+        # Count "No" answers
+        no_answers = sum(1 for qid, val in answers.items() if val == 'No')
+
+        # Display current progress
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Current Score", f"{current_score}/100")
+        with col2:
+            answered = len([v for v in answers.values() if v not in [None, '']])
+            total_questions = len(questions_df)
+            st.metric("Questions Answered", f"{answered}/{total_questions}")
+        with col3:
+            st.metric("No Answers", no_answers)
+
+        st.divider()
+
+        # Comment field
+        st.markdown("### 📝 Additional Comments (Optional)")
+        manager_comment = st.text_area(
+            "Add any additional comments or notes about this employee:",
+            height=100,
+            placeholder="Enter your comments here...",
+            help="These comments will be included in the email sent to the employee but won't affect the score."
+        )
+
+        st.divider()
+
+        if st.button("Submit Scorecard", type='primary'):
             missing = [qid for qid, value in answers.items() if value in [None, '']]
             if missing:
                 st.error("Please answer every question before submitting.")
             else:
+                # Create success message
                 manager_row = manager_employees.iloc[0]
-                response_entry = create_response_entry(manager_row, selected_employee, answers)
+                response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
+
+                # Submit the response
                 append_response(response_entry)
+
+                # Send email
                 stage_email = 'employee'
                 sent, recipient, preview = send_stage_email(response_entry, stage_email)
-                st.success("Draft saved and sent to employee for verification.")
-                if sent:
-                    st.info(f"Verification email sent to {recipient}.")
+
+                # Success feedback
+                st.success("**Scorecard Submitted Successfully!**")
+                st.info(f"Verification email sent to employee: **{recipient}**")
+
+                # Check if there are more employees to review
+                reviewed_employee_ids = set()
+                if not responses_df.empty:
+                    manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+                    reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
+
+                remaining_employees = []
+                for _, emp in manager_employees.iterrows():
+                    if str(emp['ID']) not in reviewed_employee_ids:
+                        remaining_employees.append(f"{emp['name']} ({emp['ID']})")
+
+                if remaining_employees:
+                    st.warning(f"**{len(remaining_employees)} employees still need review:**")
+                    for emp in remaining_employees[:3]:  # Show first 3
+                        st.write(f"• {emp}")
+                    if len(remaining_employees) > 3:
+                        st.write(f"• ... and {len(remaining_employees) - 3} more")
                 else:
-                    st.warning("SMTP is not configured. Copy the approval links below and send them manually if needed.")
+                    st.success("🎉 **All employees under your supervision have been reviewed!**")
+
+                if not sent:
+                    st.warning("**Email not configured** - Copy approval links below and send manually:")
                     approve_link, reject_link = get_stage_links(response_entry)
-                    st.markdown(f"**Approve:** {approve_link}")
-                    st.markdown(f"**Reject:** {reject_link}")
+                    st.code(f"Approve: {approve_link}")
+                    st.code(f"Reject: {reject_link}")
+
+                # Auto-refresh after 3 seconds to show updated status
+                time.sleep(3)
                 st.rerun()
 
 with tab_status:
@@ -837,17 +913,17 @@ with tab_status:
         else:
             manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
             for _, row in manager_responses.iterrows():
-                status_color = {
-                    'Pending Employee': '🟡',
-                    'Pending Manager': '🟠',
-                    'Pending Executive': '🔴',
-                    'Approved': '🟢',
-                    'Rejected by Employee': '🔴',
-                    'Rejected by Manager': '🔴',
-                    'Rejected by Executive': '🔴'
-                }.get(row['status'], '⚪')
+                status_indicator = {
+                    'Pending Employee': '[PENDING EMPLOYEE]',
+                    'Pending Manager': '[PENDING MANAGER]',
+                    'Pending Executive': '[PENDING EXECUTIVE]',
+                    'Approved': '[APPROVED]',
+                    'Rejected by Employee': '[REJECTED BY EMPLOYEE]',
+                    'Rejected by Manager': '[REJECTED BY MANAGER]',
+                    'Rejected by Executive': '[REJECTED BY EXECUTIVE]'
+                }.get(row['status'], '[UNKNOWN]')
 
-                with st.expander(f"{status_color} {row['employee_name']} — {row['status']}"):
+                with st.expander(f"{status_indicator} {row['employee_name']} — {row['status']}"):
                     # Create a cleaner layout with columns
                     col1, col2 = st.columns(2)
 
@@ -860,17 +936,17 @@ with tab_status:
 
                     with col2:
                         st.markdown("**👥 Approval Status:**")
-                        emp_status = f"✅ Yes" if row['employee_agree'] == 'Yes' else f"❌ No" if row['employee_agree'] == 'No' else "⏳ Pending"
+                        emp_status = "[YES]" if row['employee_agree'] == 'Yes' else "[NO]" if row['employee_agree'] == 'No' else "[PENDING]"
                         st.write(f"• **Employee:** {emp_status}")
                         if row['employee_agree_ts']:
                             st.write(f"  _{row['employee_agree_ts']}_")
 
-                        mgr_status = f"✅ Yes" if row['manager_agree'] == 'Yes' else f"❌ No" if row['manager_agree'] == 'No' else "⏳ Pending"
+                        mgr_status = "[YES]" if row['manager_agree'] == 'Yes' else "[NO]" if row['manager_agree'] == 'No' else "[PENDING]"
                         st.write(f"• **Manager:** {mgr_status}")
                         if row['manager_agree_ts']:
                             st.write(f"  _{row['manager_agree_ts']}_")
 
-                        exec_status = f"✅ Yes" if row['executive_agree'] == 'Yes' else f"❌ No" if row['executive_agree'] == 'No' else "⏳ Pending"
+                        exec_status = "[YES]" if row['executive_agree'] == 'Yes' else "[NO]" if row['executive_agree'] == 'No' else "[PENDING]"
                         st.write(f"• **Executive:** {exec_status}")
                         if row['executive_agree_ts']:
                             st.write(f"  _{row['executive_agree_ts']}_")
@@ -878,24 +954,24 @@ with tab_status:
                     # Status message with better formatting
                     st.markdown("---")
                     if row['status'] == 'Pending Employee':
-                        st.info("⏳ **Next Step:** Waiting for employee verification via email.")
+                        st.info("**Next Step:** Waiting for employee verification via email.")
                     elif row['status'] == 'Pending Manager':
-                        st.warning("⚠️ **Action Required:** Your approval is needed.")
+                        st.warning("**Action Required:** Your approval is needed.")
                     elif row['status'] == 'Pending Executive':
-                        st.info("⏳ **Next Step:** Waiting for executive approval.")
+                        st.info("**Next Step:** Waiting for executive approval.")
                     elif row['status'] == 'Approved':
-                        st.success("✅ **Complete:** This scorecard is fully approved!")
+                        st.success("**Complete:** This scorecard is fully approved!")
                     else:
-                        st.error("❌ **Rejected:** This scorecard was rejected and requires review.")
+                        st.error("**Rejected:** This scorecard was rejected and requires review.")
 
                     # Resend email button
-                    if st.button(f"📧 Resend approval email", key=f"resend_{row['response_id']}", help="Send the current approval email again"):
+                    if st.button(f"Resend approval email", key=f"resend_{row['response_id']}", help="Send the current approval email again"):
                         stage = 'employee' if row['status'] == 'Pending Employee' else 'manager' if row['status'] == 'Pending Manager' else 'executive' if row['status'] == 'Pending Executive' else 'rejected'
                         sent, recipient, preview = send_stage_email(row, stage)
                         if sent:
-                            st.success(f"✅ Email resent to {recipient}.")
+                            st.success(f"Email resent to {recipient}.")
                         else:
-                            st.warning("⚠️ SMTP not configured. Use the preview links below.")
+                            st.warning("SMTP not configured. Use the preview links below.")
                             approve_link, reject_link = get_stage_links(row)
-                            st.markdown(f"**🔗 Approve:** {approve_link}")
-                            st.markdown(f"**🔗 Reject:** {reject_link}")
+                            st.markdown(f"**Approve:** {approve_link}")
+                            st.markdown(f"**Reject:** {reject_link}")
