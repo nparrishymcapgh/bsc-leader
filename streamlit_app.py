@@ -742,7 +742,7 @@ with tab_new:
             # Display current progress
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Current Score", f"{current_score}/100")
+                st.metric("Current Score", f"{current_score}")
             with col2:
                 answered = len([v for v in answers.values() if v not in [None, '']])
                 total_questions = len(questions_df)
