@@ -796,11 +796,34 @@ query_params = st.query_params
 action = query_params.get('action')
 response_id = query_params.get('response_id')
 token = query_params.get('token')
+debug_mode = query_params.get('debug') == 'connection'
 
 if action and response_id and token:
     st.info("Processing approval link...")
     process_action(action, response_id, token)
     st.stop()
+
+# Debug mode bypasses login and shows all data
+if debug_mode:
+    st.session_state.logged_in = True
+    st.session_state.manager_email = 'debug@mode.com'
+    st.session_state.manager_name = 'Debug User'
+    if not st.session_state.data_loaded:
+        with st.spinner("Loading data..."):
+            employees_df = load_sheet(EMPLOYEES_TAB)
+            questions_df = load_sheet(QUESTIONS_TAB)
+            responses_df = load_responses()
+            st.session_state.employees_df = employees_df
+            st.session_state.questions_df = questions_df
+            st.session_state.responses_df = responses_df
+            st.session_state.data_loaded = True
+    responses_df = load_responses()
+    responses_df['employee_id'] = responses_df['employee_id'].astype(str)
+    st.sidebar.warning("🔧 DEBUG MODE - Showing all data")
+    st.sidebar.markdown("**Debug Info:**")
+    st.sidebar.write(f"Responses: {len(responses_df)} records")
+    st.sidebar.write(f"Employees: {len(st.session_state.employees_df)} records")
+    st.sidebar.write(f"Questions: {len(st.session_state.questions_df)} records")
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -857,13 +880,25 @@ with tab_new:
     # Filter out employees that have already been reviewed
     reviewed_employee_ids = set()
     if not responses_df.empty:
-        manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-        reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
+        if debug_mode:
+            # In debug mode, don't filter by manager - show all submissions
+            reviewed_employee_ids = set(responses_df['employee_id'].astype(str).unique())
+        else:
+            manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+            reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
     
-    available_employees = manager_employees[~manager_employees['ID'].astype(str).isin(reviewed_employee_ids)]
+    if debug_mode:
+        # In debug mode, show all employees
+        available_employees = st.session_state.employees_df[~st.session_state.employees_df['ID'].astype(str).isin(reviewed_employee_ids)]
+        st.info("🔧 DEBUG MODE: Showing all employees (not filtered by manager)")
+    else:
+        available_employees = manager_employees[~manager_employees['ID'].astype(str).isin(reviewed_employee_ids)]
     
     if available_employees.empty:
-        st.success("🎉 **All employees under your supervision have been reviewed!**")
+        if debug_mode:
+            st.success("🎉 **All employees in the system have been reviewed!**")
+        else:
+            st.success("🎉 **All employees under your supervision have been reviewed!**")
         st.info("You have successfully completed performance reviews for all your direct reports.")
         st.stop()
     
@@ -1005,11 +1040,20 @@ with tab_status:
         if responses_df.empty:
             st.info("No scorecards submitted yet.")
         else:
-            manager_responses = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+            # In debug mode, show all responses; otherwise filter by manager
+            if debug_mode:
+                manager_responses = responses_df
+                st.info("🔧 DEBUG MODE: Showing all responses from all managers")
+            else:
+                manager_responses = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+            
             st.write(f"Debug: manager_responses shape = {manager_responses.shape}")
             
             if manager_responses.empty:
-                st.info("No scorecards found for your manager email.")
+                if debug_mode:
+                    st.error("No responses found in the system.")
+                else:
+                    st.info("No scorecards found for your manager email.")
             else:
                 manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
                 for _, row in manager_responses.iterrows():
