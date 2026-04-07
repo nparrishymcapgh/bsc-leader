@@ -350,10 +350,12 @@ def load_sheet(tab_name):
 @st.cache_data(ttl=60)
 @lru_cache(maxsize=None)
 def load_responses():
+    print("DEBUG: load_responses() called")
     spreadsheet = get_spreadsheet()
     worksheet = ensure_responses_sheet(spreadsheet)
     records = worksheet.get_all_records()
     df = pd.DataFrame(records)
+    print(f"DEBUG: load_responses() - got {len(records)} records from sheet")
     # Ensure all expected columns exist, even if sheet is empty
     expected_columns = [
         "response_id", "created_at", "updated_at", "manager_email", "manager_name",
@@ -366,6 +368,7 @@ def load_responses():
     for col in expected_columns:
         if col not in df.columns:
             df[col] = ""
+    print(f"DEBUG: load_responses() - returning df with shape {df.shape}")
     return df
 
 def ensure_responses_sheet(spreadsheet):
@@ -706,7 +709,6 @@ def send_stage_email(response, stage):
 
 def process_action(action, response_id, token):
     try:
-        st.info(f"DEBUG: Processing action '{action}' for response_id: {response_id}")
         response, _, _ = find_response_by_id(response_id)
         if not response:
             st.error("Approval record not found. Please check that the link is correct and the record exists.")
@@ -724,24 +726,19 @@ def process_action(action, response_id, token):
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         updates = {"updated_at": now}
 
-        st.info(f"DEBUG: Checking approval conditions for action: {action}")
-
         if action == 'employee_approve' and response['status'] == 'Pending Employee' and token == response.get('employee_token'):
-            st.info("DEBUG: Employee approve condition met")
             valid = True
             updates['employee_agree'] = 'Yes'
             updates['employee_agree_ts'] = now
             updates['status'] = 'Pending Manager'
             stage_email = 'manager'
         elif action == 'employee_reject' and response['status'] == 'Pending Employee' and token == response.get('employee_token'):
-            st.info("DEBUG: Employee reject condition met")
             valid = True
             updates['employee_agree'] = 'No'
             updates['employee_agree_ts'] = now
             updates['status'] = 'Rejected by Employee'
             stage_email = 'rejected'
         elif action == 'manager_approve' and (response['status'] == 'Pending Employee' or response['status'] == 'Pending Manager') and token == response.get('manager_token'):
-            st.info("DEBUG: Manager approve condition met")
             valid = True
             updates['manager_agree'] = 'Yes'
             updates['manager_agree_ts'] = now
@@ -753,22 +750,18 @@ def process_action(action, response_id, token):
                 updates['status'] = 'Pending Executive'
             stage_email = 'executive'
         elif action == 'manager_reject' and (response['status'] == 'Pending Employee' or response['status'] == 'Pending Manager') and token == response.get('manager_token'):
-            st.info("DEBUG: Manager reject condition met")
             valid = True
             updates['manager_agree'] = 'No'
             updates['manager_agree_ts'] = now
             updates['status'] = 'Rejected by Manager'
             stage_email = 'rejected'
         elif action == 'executive_approve' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
-            st.info("DEBUG: Executive approve condition met")
-            st.info(f"Executive approval: token match = {token == response.get('executive_token')}, current status = {response['status']}")
             valid = True
             updates['executive_agree'] = 'Yes'
             updates['executive_agree_ts'] = now
             updates['status'] = 'Approved'
             # No stage_email for final approval
         elif action == 'executive_reject' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
-            st.info("DEBUG: Executive reject condition met")
             valid = True
             updates['executive_agree'] = 'No'
             updates['executive_agree_ts'] = now
@@ -777,13 +770,8 @@ def process_action(action, response_id, token):
 
         if not valid:
             st.error("This approval link is invalid or the action is not allowed.")
-            token_type = action.split('_')[0] + '_token'
-            token_match = token == response.get(token_type)
-            st.info(f"Action: {action}, Status: {response['status']}, Token match: {token_match}")
-            st.info("DEBUG: No valid approval condition was met")
             return
 
-        st.info(f"DEBUG: Approval is valid! Action: {action}, Updates: {updates}")
         if update_response(response_id, updates):
             st.success("Thank you. The scorecard status has been updated.")
             if stage_email:
@@ -822,10 +810,6 @@ action = query_params.get('action')
 response_id = query_params.get('response_id')
 token = query_params.get('token')
 debug_mode = query_params.get('debug') == 'connection'
-
-# Debug output for query parameters
-if action or response_id or token:
-    st.info(f"DEBUG: Query params - action: {action}, response_id: {response_id}, token: {token[:10] if token else None}...")
 
 if action and response_id and token:
     st.info("Processing approval link...")
