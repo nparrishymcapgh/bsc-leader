@@ -271,11 +271,12 @@ def format_email_body(subject, employee, question_rows, answers, stage, approve_
     html.append(f"<p><strong>Score:</strong> {questions_score}</p>")
     html.append(f"<p><strong>Number of No answers:</strong> {number_of_nos}</p>")
 
-    html.append("<p>Please approve or reject using the links below.</p>")
-    if approve_link:
-        html.append(f"<p><a href=\"{approve_link}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Approve</a></p>")
-    if reject_link:
-        html.append(f"<p><a href=\"{reject_link}\" style=\"background:#A80000;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Reject</a></p>")
+    if approve_link or reject_link:
+        html.append("<p>Please approve or reject using the links below.</p>")
+        if approve_link:
+            html.append(f"<p><a href=\"{approve_link}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Approve</a></p>")
+        if reject_link:
+            html.append(f"<p><a href=\"{reject_link}\" style=\"background:#A80000;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Reject</a></p>")
     html.append("<p>If you have any questions, please contact your manager.</p>")
 
     # Keep comments at the end for all stages (employee, manager, executive).
@@ -372,6 +373,28 @@ def append_response(row):
     worksheet.append_row(ordered_row)
 
 
+def delete_response(response_id):
+    """Delete a response row by response_id so manager can resubmit a new review."""
+    try:
+        spreadsheet = get_spreadsheet()
+        worksheet = ensure_responses_sheet(spreadsheet)
+        records = worksheet.get_all_records()
+        df = pd.DataFrame(records)
+        if df.empty or 'response_id' not in df.columns:
+            return False
+
+        matches = df[df['response_id'] == response_id]
+        if matches.empty:
+            return False
+
+        row_index = matches.index[0] + 2  # header row offset
+        worksheet.delete_rows(row_index)
+        return True
+    except Exception as e:
+        st.error(f"Unable to delete response: {e}")
+        return False
+
+
 def create_response_entry(manager, employee, answers, comment=""):
     score_answers = [int(v) for qid, v in answers.items() if v in ["1", "2", "3"]]
     questions_score = int(round(sum(score_answers) / len(score_answers) * 100)) if score_answers else 0
@@ -445,8 +468,7 @@ def send_stage_email(response, stage):
     stage_label = {
         'employee': 'Employee Verification',
         'manager': 'Manager Approval',
-        'executive': 'Executive Approval',
-        'rejected': 'Review Required'
+        'executive': 'Executive Approval'
     }.get(stage, stage)
 
     subject = f"Leader Level Balanced Score Card - {stage_label}"
@@ -481,12 +503,62 @@ def send_stage_email(response, stage):
         return False, recipient, body
 
 
+def send_rejection_notice_to_manager(response, rejected_by_role, rejected_by_name, rejection_comment):
+    """Notify manager that the review was rejected and removed for resubmission."""
+    recipient = response.get('manager_email', '')
+    if not recipient or '@' not in recipient:
+        return False, recipient
+
+    app_url = get_app_url()
+    subject = "Leader Level Balanced Score Card - Rejected and Reset"
+    body = [f"<h2>{subject}</h2>"]
+    body.append("<p>The balanced score card below was rejected and has been removed.</p>")
+    body.append(f"<p><strong>Rejected By:</strong> {rejected_by_name} ({rejected_by_role})</p>")
+    body.append(f"<p><strong>Employee:</strong> {response.get('employee_name', '')} ({response.get('employee_id', '')})</p>")
+    body.append(f"<p><strong>Manager:</strong> {response.get('manager_name', '')} ({response.get('manager_email', '')})</p>")
+
+    if rejection_comment.strip():
+        body.append("<p><strong>Rejection Comments:</strong></p>")
+        body.append(
+            f"<blockquote style='border-left:4px solid #A80000;padding-left:10px;margin:10px 0;font-style:italic;'>{rejection_comment.strip()}</blockquote>"
+        )
+
+    if app_url:
+        body.append(f"<p>Please return to the app and submit a new review: <a href=\"{app_url}\">{app_url}</a></p>")
+    else:
+        body.append("<p>Please return to the app and submit a new review.</p>")
+
+    success = send_email(subject, "".join(body), recipient)
+    return success, recipient
+
+
 def process_action(action, response_id, token):
     try:
         response, _, _ = find_response_by_id(response_id)
         if not response:
             st.error("Approval record not found. Please check that the link is correct and the record exists.")
             return
+
+        rejector_map = {
+            'employee_reject': ('Employee', response.get('employee_name', 'Employee')),
+            'manager_reject': ('Manager', response.get('manager_name', response.get('manager_email', 'Manager'))),
+            'executive_reject': ('Executive', response.get('executive_email', 'Executive'))
+        }
+
+        rejection_comment = ""
+        if action in rejector_map:
+            role_label, rejector_name = rejector_map[action]
+            st.warning(f"You are rejecting this score card as {role_label}.")
+            rejection_comment = st.text_area(
+                "Please provide a rejection comment (required):",
+                key=f"reject_comment_{response_id}_{action}",
+                height=120
+            )
+            if not st.button("Submit Rejection", type='primary', key=f"submit_reject_{response_id}_{action}"):
+                return
+            if not rejection_comment.strip():
+                st.error("A rejection comment is required.")
+                return
 
         valid = False
         stage_email = None
@@ -504,7 +576,6 @@ def process_action(action, response_id, token):
             updates['employee_agree'] = 'No'
             updates['employee_agree_ts'] = now
             updates['status'] = 'Rejected by Employee'
-            stage_email = 'rejected'
         elif action == 'manager_approve' and (response['status'] == 'Pending Employee' or response['status'] == 'Pending Manager') and token == response.get('manager_token'):
             valid = True
             updates['manager_agree'] = 'Yes'
@@ -521,7 +592,6 @@ def process_action(action, response_id, token):
             updates['manager_agree'] = 'No'
             updates['manager_agree_ts'] = now
             updates['status'] = 'Rejected by Manager'
-            stage_email = 'rejected'
         elif action == 'executive_approve' and response['status'] == 'Pending Executive' and token == response.get('executive_token'):
             valid = True
             updates['executive_agree'] = 'Yes'
@@ -533,10 +603,24 @@ def process_action(action, response_id, token):
             updates['executive_agree'] = 'No'
             updates['executive_agree_ts'] = now
             updates['status'] = 'Rejected by Executive'
-            stage_email = 'rejected'
 
         if not valid:
             st.error("This approval link is invalid or the action is not allowed.")
+            return
+
+        if action in rejector_map:
+            role_label, rejector_name = rejector_map[action]
+            deleted = delete_response(response_id)
+            if not deleted:
+                st.error("Unable to reset this review after rejection. Please contact support.")
+                return
+
+            sent, recipient = send_rejection_notice_to_manager(response, role_label, rejector_name, rejection_comment)
+            st.success("Thank you. The scorecard was rejected and removed so a new review can be submitted.")
+            if sent:
+                st.info(f"Manager notification sent to {recipient}.")
+            else:
+                st.warning("Could not send manager notification email. Please notify the manager manually.")
             return
 
         if update_response(response_id, updates):
