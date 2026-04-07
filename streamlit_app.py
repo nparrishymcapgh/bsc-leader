@@ -665,6 +665,17 @@ if not st.session_state.logged_in:
             st.rerun()
         else:
             st.error("Manager email not found. Please enter an email listed in the Employees sheet.")
+    
+    # TEMPORARY DEBUG: Show employees for debugging
+    if st.button("Show Available Manager Emails"):
+        if not st.session_state.employees_df.empty:
+            unique_managers = st.session_state.employees_df['manager_email'].unique()
+            st.write("Available manager emails:")
+            for email in unique_managers:
+                st.write(f"- {email}")
+        else:
+            st.error("Employees sheet is empty!")
+    
     st.stop()
 
 st.sidebar.markdown(f"**Signed in as:** {st.session_state.manager_name} ({st.session_state.manager_email})")
@@ -863,6 +874,11 @@ with tab_status:
     try:
         st.markdown("### Your scorecard status dashboard")
         
+        # Show login status
+        st.write(f"Debug: logged_in = {st.session_state.get('logged_in', False)}")
+        st.write(f"Debug: manager_email = {st.session_state.get('manager_email', 'NOT SET')}")
+        st.write(f"Debug: manager_name = {st.session_state.get('manager_name', 'NOT SET')}")
+        
         # Always load fresh data for the status page
         current_responses_df = load_responses()
         
@@ -875,7 +891,11 @@ with tab_status:
                 st.markdown("---")
         
         st.write(f"Debug: responses_df shape = {current_responses_df.shape}")
-        st.write(f"Debug: manager_email = {st.session_state.manager_email}")
+        
+        # Show all manager emails in the data for debugging
+        if not current_responses_df.empty:
+            unique_managers = current_responses_df['manager_email'].unique()
+            st.write(f"Debug: unique manager_emails in data = {list(unique_managers)}")
         
         if current_responses_df.empty:
             st.info("No scorecards submitted yet.")
@@ -886,6 +906,7 @@ with tab_status:
                 st.info("🔧 DEBUG MODE: Showing all responses from all managers")
             else:
                 manager_responses = current_responses_df[current_responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+                st.write(f"Debug: filtering by manager_email '{st.session_state.manager_email}' (lowercase comparison)")
             
             st.write(f"Debug: manager_responses shape = {manager_responses.shape}")
             

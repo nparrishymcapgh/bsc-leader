@@ -45,7 +45,13 @@ if __name__ == '__main__':
         if not responses_df.empty:
             print('\nAll response_ids in sheet:')
             for idx, row in responses_df.iterrows():
-                print(f'  {row["response_id"]} - Status: {row["status"]}')
+                print(f'  {row["response_id"]} - Status: {row["status"]} - Manager: {row.get("manager_email", "N/A")}')
+
+            # Show full details of the first response
+            print('\nFull details of first response:')
+            first_row = responses_df.iloc[0]
+            for col in responses_df.columns:
+                print(f'  {col}: {first_row[col]}')
 
             # Check for the specific response_id
             target_id = '0885fe7b-0dd0-4fab-8768-62a1bdbdbfd4'
