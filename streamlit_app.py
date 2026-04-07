@@ -271,15 +271,17 @@ def format_email_body(subject, employee, question_rows, answers, stage, approve_
     html.append(f"<p><strong>Score:</strong> {questions_score}</p>")
     html.append(f"<p><strong>Number of No answers:</strong> {number_of_nos}</p>")
 
-    if comment.strip():
-        html.append(f"<p><strong>Manager Comments:</strong></p><blockquote style='border-left: 4px solid #006B6B; padding-left: 10px; margin: 10px 0; font-style: italic;'>{comment.strip()}</blockquote>")
-
     html.append("<p>Please approve or reject using the links below.</p>")
     if approve_link:
         html.append(f"<p><a href=\"{approve_link}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Approve</a></p>")
     if reject_link:
         html.append(f"<p><a href=\"{reject_link}\" style=\"background:#A80000;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Reject</a></p>")
     html.append("<p>If you have any questions, please contact your manager.</p>")
+
+    # Keep comments at the end for all stages (employee, manager, executive).
+    if comment.strip():
+        html.append(f"<p><strong>Manager Comments:</strong></p><blockquote style='border-left: 4px solid #006B6B; padding-left: 10px; margin: 10px 0; font-style: italic;'>{comment.strip()}</blockquote>")
+
     return "".join(html)
 
 # ============================================================================
@@ -710,34 +712,36 @@ with tab_new:
             st.warning("The Questions sheet is empty. Please add questions to the Google Sheet.")
         else:
             questions_df = questions_df.fillna("")
-            sections = questions_df['question_section'].astype(str).fillna('General').unique().tolist()
             answers = {}
 
             # Live score calculation
             score_questions = questions_df[questions_df['type'].astype(str).str.strip().str.lower() == 'score']
             total_score_questions = len(score_questions)
 
-            for section in sections:
-                section_rows = questions_df[questions_df['question_section'].astype(str) == section]
-                header_text = section_rows['header'].astype(str).fillna('').iloc[0]
+            for _, question in questions_df.iterrows():
+                question_section = str(question.get('question_section', '')).strip()
+                header_text = str(question.get('header', '')).strip()
+
+                if question_section:
+                    st.markdown(f"#### {question_section}")
                 if header_text:
-                    st.markdown(f"### {header_text}")
-                for _, question in section_rows.iterrows():
-                    key = f"q_{selected_employee_id}_{question['ID']}"
-                    if str(question['type']).strip().lower() == 'score':
-                        answers[str(question['ID'])] = st.radio(
-                            question['question'],
-                            options=['1', '2', '3'],
-                            key=key,
-                            index=0
-                        )
-                    else:
-                        answers[str(question['ID'])] = st.radio(
-                            question['question'],
-                            options=['Yes', 'No'],
-                            key=key,
-                            index=0
-                        )
+                    st.caption(header_text)
+
+                key = f"q_{selected_employee_id}_{question['ID']}"
+                if str(question['type']).strip().lower() == 'score':
+                    answers[str(question['ID'])] = st.radio(
+                        question['question'],
+                        options=['1', '2', '3'],
+                        key=key,
+                        index=0
+                    )
+                else:
+                    answers[str(question['ID'])] = st.radio(
+                        question['question'],
+                        options=['Yes', 'No'],
+                        key=key,
+                        index=0
+                    )
                 st.divider()
 
             # Calculate and display current score
