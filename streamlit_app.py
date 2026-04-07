@@ -802,31 +802,34 @@ with tab_new:
             score_questions = questions_df[questions_df['type'].astype(str).str.strip().str.lower() == 'score']
             total_score_questions = len(score_questions)
 
-            for _, question in questions_df.iterrows():
-                question_section = str(question.get('question_section', '')).strip()
-                header_text = str(question.get('header', '')).strip()
+            questions_df['question_section'] = questions_df['question_section'].astype(str).fillna('').str.strip()
+            grouped_sections = questions_df.groupby('question_section', dropna=False, sort=False)
 
-                if question_section:
-                    st.markdown(f"#### {question_section}")
-                if header_text:
-                    st.caption(header_text)
+            for section_name, section_rows in grouped_sections:
+                if section_name:
+                    st.markdown(f"#### {section_name}")
 
-                key = f"q_{selected_employee_id}_{question['ID']}"
-                if str(question['type']).strip().lower() == 'score':
-                    answers[str(question['ID'])] = st.radio(
-                        question['question'],
-                        options=['1', '2', '3'],
-                        key=key,
-                        index=0
-                    )
-                else:
-                    answers[str(question['ID'])] = st.radio(
-                        question['question'],
-                        options=['Yes', 'No'],
-                        key=key,
-                        index=0
-                    )
-                st.divider()
+                for _, question in section_rows.iterrows():
+                    header_text = str(question.get('header', '')).strip()
+                    if header_text:
+                        st.caption(header_text)
+
+                    key = f"q_{selected_employee_id}_{question['ID']}"
+                    if str(question['type']).strip().lower() == 'score':
+                        answers[str(question['ID'])] = st.radio(
+                            question['question'],
+                            options=['1', '2', '3'],
+                            key=key,
+                            index=0
+                        )
+                    else:
+                        answers[str(question['ID'])] = st.radio(
+                            question['question'],
+                            options=['Yes', 'No'],
+                            key=key,
+                            index=0
+                        )
+                    st.divider()
 
             # Calculate and display current score
             answered_score_questions = [qid for qid, val in answers.items() if val in ['1', '2', '3']]
