@@ -871,6 +871,7 @@ with tab_new:
                 st.rerun()
 
 with tab_status:
+    st.write("DEBUG: Status tab started")
     try:
         st.markdown("### Your scorecard status dashboard")
         
