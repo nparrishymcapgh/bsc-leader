@@ -23,13 +23,28 @@ st.set_page_config(
 # Minimal CSS to avoid breaking Streamlit's UI rendering
 custom_css = """
 <style>
-    /* Only style specific elements without using !important excessively */
-    /* Let Streamlit handle its own theme */
+    .stApp {
+        background: linear-gradient(180deg, #f7fbfb 0%, #ffffff 45%);
+    }
+
+    [data-baseweb="tab-list"] {
+        gap: 0.5rem;
+    }
+
+    [data-baseweb="tab"] {
+        border-radius: 10px;
+        padding: 0.5rem 0.9rem;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #0d5252;
+    }
+
     .stButton>button {
         background-color: #006B6B;
         color: white;
         border: none;
-        border-radius: 4px;
+        border-radius: 8px;
         font-weight: 500;
     }
     
@@ -115,31 +130,13 @@ def load_sheet(tab_name):
         return pd.DataFrame()
 
 def load_responses():
-    """Load responses with explicit error visibility"""
-    debug_messages = []
-    debug_messages.append("✓ load_responses() called")
-    
+    """Load responses from the Responses sheet."""
     try:
-        # Get connection
         spreadsheet = get_spreadsheet()
-        debug_messages.append(f"✓ Connected to sheet: {spreadsheet.title}")
-        
-        # Get worksheet
         worksheet = ensure_responses_sheet(spreadsheet)
-        debug_messages.append(f"✓ Got worksheet: {worksheet.title}")
-        
-        # Load data
         records = worksheet.get_all_records()
-        debug_messages.append(f"✓ Loaded {len(records)} records from sheet")
-        
-        # Show columns
-        if records:
-            debug_messages.append(f"✓ Columns: {', '.join(list(records[0].keys())[:5])}... ({len(records[0])} total)")
-        
-        # Create DataFrame
         df = pd.DataFrame(records)
-        debug_messages.append(f"✓ DataFrame created: shape {df.shape}")
-        
+
         # Ensure all expected columns exist
         expected_columns = [
             "response_id", "created_at", "updated_at", "manager_email", "manager_name",
@@ -153,26 +150,12 @@ def load_responses():
         for col in expected_columns:
             if col not in df.columns:
                 df[col] = ""
-        
-        debug_messages.append(f"✓ SUCCESS: Returning {len(df)} responses")
-        
-        # Store debug messages
-        st.session_state.load_responses_debug_list = debug_messages
-        
+
         return df
         
     except Exception as e:
-        error_msg = f"✗ ERROR in load_responses: {str(e)}"
-        debug_messages.append(error_msg)
-        import traceback
-        debug_messages.append(traceback.format_exc())
-        
-        st.session_state.load_responses_debug_list = debug_messages
-        
-        # SHOW THE ERROR PROMINENTLY
-        st.error("ERROR: Could not load responses from sheet!")
-        st.error(error_msg)
-        
+        st.error("Could not load responses from the sheet.")
+        st.error(str(e))
         return pd.DataFrame()
 
 def ensure_responses_sheet(spreadsheet):
@@ -339,12 +322,10 @@ def update_response(response_id, updates):
                 df[col] = ""
         
         if df.empty:
-            print(f"DEBUG: update_response - No records found")
             return False
 
         match = df[df['response_id'] == response_id]
         if match.empty:
-            print(f"DEBUG: update_response - No match found for response_id: {response_id}")
             return False
 
         row_index = match.index[0] + 2
@@ -352,39 +333,21 @@ def update_response(response_id, updates):
         row_values = worksheet.row_values(row_index)
         row_data = {header[i]: row_values[i] if i < len(row_values) else "" for i in range(len(header))}
 
-        print(f"DEBUG: update_response - row_index: {row_index}, header length: {len(header)}, row_values length: {len(row_values)}")
-        print(f"DEBUG: update_response - Before update: status = {row_data.get('status', 'N/A')}")
-        
         for key, value in updates.items():
             if key not in header:
-                print(f"DEBUG: update_response - Adding new column: {key}")
                 header.append(key)
                 # Update the worksheet header row with the new column
                 worksheet.update(f"{chr(64 + len(header))}{1}", [[key]])
                 row_data[key] = value
-            else:
-                print(f"DEBUG: update_response - Updating existing column: {key} = {value}")
             row_data[key] = value
 
         ordered_row = [row_data.get(col, "") for col in header]
-        print(f"DEBUG: update_response - Final ordered_row length: {len(ordered_row)}, header length: {len(header)}")
         update_range = f"A{row_index}:{chr(64 + len(header))}{row_index}"
-        print(f"DEBUG: update_response - Updating range: {update_range}")
         worksheet.update(update_range, [ordered_row])
-        
-        # Verify the update
-        records_after = worksheet.get_all_records()
-        df_after = pd.DataFrame(records_after)
-        match_after = df_after[df_after['response_id'] == response_id]
-        if not match_after.empty:
-            new_status = match_after.iloc[0].get('status', 'N/A')
-            print(f"DEBUG: update_response - After update: status = {new_status}")
-        
+
         return True
     except Exception as e:
-        print(f"DEBUG: update_response - Error: {e}")
-        import traceback
-        traceback.print_exc()
+        st.error(f"Unable to update response: {e}")
         return False
 
 
@@ -510,14 +473,7 @@ def process_action(action, response_id, token):
         response, _, _ = find_response_by_id(response_id)
         if not response:
             st.error("Approval record not found. Please check that the link is correct and the record exists.")
-            st.info(f"Debug info: Looking for response_id: {response_id}")
             return
-
-        st.info(f"Found record for {response.get('employee_name', 'Unknown')} - Status: {response['status']}")
-        if response.get('comments', '').strip():
-            st.info(f"Comments present: {len(response['comments'])} characters")
-        else:
-            st.info("No comments found in record")
 
         valid = False
         stage_email = None
@@ -631,11 +587,6 @@ if debug_mode:
             st.session_state.data_loaded = True
     responses_df = load_responses()
     responses_df['employee_id'] = responses_df['employee_id'].astype(str)
-    st.sidebar.warning("🔧 DEBUG MODE - Showing all data")
-    st.sidebar.markdown("**Debug Info:**")
-    st.sidebar.write(f"Responses: {len(responses_df)} records")
-    st.sidebar.write(f"Employees: {len(st.session_state.employees_df)} records")
-    st.sidebar.write(f"Questions: {len(st.session_state.questions_df)} records")
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -665,17 +616,7 @@ if not st.session_state.logged_in:
             st.rerun()
         else:
             st.error("Manager email not found. Please enter an email listed in the Employees sheet.")
-    
-    # TEMPORARY DEBUG: Show employees for debugging
-    if st.button("Show Available Manager Emails"):
-        if not st.session_state.employees_df.empty:
-            unique_managers = st.session_state.employees_df['manager_email'].unique()
-            st.write("Available manager emails:")
-            for email in unique_managers:
-                st.write(f"- {email}")
-        else:
-            st.error("Employees sheet is empty!")
-    
+
     st.stop()
 
 st.sidebar.markdown(f"**Signed in as:** {st.session_state.manager_name} ({st.session_state.manager_email})")
@@ -710,7 +651,7 @@ with tab_new:
     can_submit = True
 
     if debug_mode and manager_employees.empty:
-        st.info("🔧 DEBUG MODE: No employees found matching current filters.")
+        st.info("No employees found matching current filters.")
         can_submit = False
     elif not debug_mode and manager_employees.empty:
         st.info("📋 You don't have any employees assigned as a manager in the system.")
@@ -731,7 +672,6 @@ with tab_new:
         if debug_mode:
             # In debug mode, show all employees
             available_employees = st.session_state.employees_df[~st.session_state.employees_df['ID'].astype(str).isin(reviewed_employee_ids)]
-            st.info("🔧 DEBUG MODE: Showing all employees (not filtered by manager)")
         else:
             available_employees = manager_employees[~manager_employees['ID'].astype(str).isin(reviewed_employee_ids)]
 
@@ -875,6 +815,7 @@ with tab_new:
 
 with tab_status:
     st.markdown("### Your scorecard status dashboard")
+    st.caption("Track approvals and progress for scorecards you've submitted.")
 
     try:
         current_responses_df = load_responses()
@@ -895,23 +836,48 @@ with tab_status:
             else:
                 manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
 
-                # Hard fallback: always render a plain table first.
+                total_count = len(manager_responses)
+                approved_count = int((manager_responses['status'].astype(str) == 'Approved').sum())
+                pending_count = int(manager_responses['status'].astype(str).str.startswith('Pending').sum())
+                rejected_count = int(manager_responses['status'].astype(str).str.contains('Rejected').sum())
+
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Total Submitted", total_count)
+                k2.metric("Approved", approved_count)
+                k3.metric("Pending", pending_count)
+                k4.metric("Rejected", rejected_count)
+
+                st.markdown("#### Submission Summary")
                 summary_columns = [
-                    'response_id', 'employee_name', 'employee_email', 'status',
+                    'employee_name', 'employee_email', 'status',
                     'questions_score', 'number_of_nos', 'created_at', 'updated_at'
                 ]
                 available_summary_columns = [c for c in summary_columns if c in manager_responses.columns]
-                st.dataframe(manager_responses[available_summary_columns], use_container_width=True)
+                summary_df = manager_responses[available_summary_columns].copy()
+                summary_df = summary_df.rename(columns={
+                    'employee_name': 'Employee',
+                    'employee_email': 'Email',
+                    'status': 'Status',
+                    'questions_score': 'Score',
+                    'number_of_nos': 'No Answers',
+                    'created_at': 'Created',
+                    'updated_at': 'Updated'
+                })
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-                st.markdown("#### Details")
+                st.markdown("#### Scorecard Details")
                 for _, row in manager_responses.iterrows():
-                    st.markdown(f"**{row.get('employee_name', 'Unknown Employee')}**")
-                    st.write(f"Status: {row.get('status', '')}")
-                    st.write(f"Score: {row.get('questions_score', '')}")
-                    st.write(f"No answers: {row.get('number_of_nos', '')}")
-                    st.write(f"Created: {row.get('created_at', '')}")
-                    st.write(f"Updated: {row.get('updated_at', '')}")
-                    st.divider()
+                    title = f"{row.get('employee_name', 'Unknown Employee')} • {row.get('status', '')}"
+                    with st.expander(title):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.write(f"Score: {row.get('questions_score', '')}")
+                            st.write(f"No answers: {row.get('number_of_nos', '')}")
+                            st.write(f"Created: {row.get('created_at', '')}")
+                        with c2:
+                            st.write(f"Updated: {row.get('updated_at', '')}")
+                            st.write(f"Employee: {row.get('employee_email', '')}")
+                            st.write(f"Manager: {row.get('manager_email', '')}")
     except Exception as e:
         st.error(f"Error loading scorecard status: {e}")
         import traceback
