@@ -1051,18 +1051,21 @@ with tab_new:
 with tab_status:
     try:
         st.markdown("### Your scorecard status dashboard")
-        st.write(f"Debug: responses_df shape = {responses_df.shape}")
+        
+        # Always load fresh data for the status page
+        current_responses_df = load_responses()
+        st.write(f"Debug: responses_df shape = {current_responses_df.shape}")
         st.write(f"Debug: manager_email = {st.session_state.manager_email}")
         
-        if responses_df.empty:
+        if current_responses_df.empty:
             st.info("No scorecards submitted yet.")
         else:
             # In debug mode, show all responses; otherwise filter by manager
             if debug_mode:
-                manager_responses = responses_df
+                manager_responses = current_responses_df
                 st.info("🔧 DEBUG MODE: Showing all responses from all managers")
             else:
-                manager_responses = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+                manager_responses = current_responses_df[current_responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
             
             st.write(f"Debug: manager_responses shape = {manager_responses.shape}")
             
