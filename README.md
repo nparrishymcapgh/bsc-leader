@@ -229,6 +229,9 @@ Employee response behavior:
 - Each employee can have only one active record in `Employee_Responses`.
 - If a response already exists, the employee sees it instead of a blank form.
 - Employees can delete their existing response and submit a new one for themselves.
+- Managers cannot submit a scorecard for an employee until that employee has a self-evaluation on file.
+- If a self-evaluation is missing, the manager dashboard can send a reminder email to the employee with the app link.
+- Managers can view submitted self-evaluations at any time in the `Employee Self-Evaluations` tab.
 
 ### 6. Test your setup (optional but recommended)
 

@@ -396,6 +396,28 @@ def find_employee_response_by_email(employee_email):
     return row.to_dict(), row_index, df
 
 
+def get_latest_employee_response_for_email(employee_responses_df, employee_email):
+    if employee_responses_df.empty:
+        return None
+
+    matches = employee_responses_df[
+        employee_responses_df['employee_email'].astype(str).str.strip().str.lower() == employee_email.strip().lower()
+    ].copy()
+
+    if matches.empty:
+        return None
+
+    if 'updated_at' in matches.columns:
+        matches['sort_timestamp'] = matches['updated_at'].astype(str)
+    elif 'created_at' in matches.columns:
+        matches['sort_timestamp'] = matches['created_at'].astype(str)
+    else:
+        matches['sort_timestamp'] = ""
+
+    latest_row = matches.sort_values('sort_timestamp', ascending=False).iloc[0]
+    return latest_row.to_dict()
+
+
 def append_employee_response(row):
     spreadsheet = get_spreadsheet()
     worksheet = ensure_employee_responses_sheet(spreadsheet)
@@ -752,6 +774,32 @@ def send_rejection_notice_to_manager(response, rejected_by_role, rejected_by_nam
     return success, recipient
 
 
+def send_self_evaluation_reminder_email(employee, manager_name):
+    recipient = str(employee.get('email', '')).strip()
+    if not recipient or '@' not in recipient:
+        return False, recipient, ""
+
+    app_url = get_app_url()
+    subject = "Action Required: Complete your self-evaluation"
+    body = [
+        "<h2>Self-evaluation required</h2>",
+        f"<p>Hello {employee.get('name', 'Employee')},</p>",
+        f"<p>{manager_name} is ready to complete your balanced score card review, but your self-evaluation has not been submitted yet.</p>",
+        "<p>Please log in to the Leader Level Balanced Score Card app using your employee email and submit your self-evaluation.</p>"
+    ]
+
+    if app_url:
+        body.append(f"<p><a href=\"{app_url}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Open the App</a></p>")
+        body.append(f"<p>Direct link: <a href=\"{app_url}\">{app_url}</a></p>")
+    else:
+        body.append("<p>Please contact your manager for the app link.</p>")
+
+    body.append("<p>Thank you.</p>")
+
+    success = send_email(subject, "".join(body), recipient)
+    return success, recipient, app_url
+
+
 def process_action(action, response_id, token):
     try:
         response, _, _ = find_response_by_id(response_id)
@@ -1010,9 +1058,11 @@ if st.session_state.user_role == 'manager':
         st.warning("Manager email not found in the Employees sheet.")
         st.info("You can still view scorecard statuses for any scorecards you've submitted.")
 
+    employee_self_responses_df = load_employee_responses()
+
     st.subheader("Manager Dashboard")
 
-    tab_new, tab_status = st.tabs(["Submit Scorecard", "Scorecard Status"])
+    tab_new, tab_status, tab_self_eval = st.tabs(["Submit Scorecard", "Scorecard Status", "Employee Self-Evaluations"])
 
     with tab_new:
         st.markdown("### Submit a new balanced score card")
@@ -1060,120 +1110,155 @@ if st.session_state.user_role == 'manager':
                 format_func=lambda eid: f"{available_employees[available_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
             )
             selected_employee = available_employees[available_employees['ID'].astype(str) == selected_employee_id].iloc[0]
+            selected_employee_email = str(selected_employee.get('email', '')).strip().lower()
+            selected_employee_self_eval = get_latest_employee_response_for_email(
+                employee_self_responses_df,
+                selected_employee_email
+            )
+
             st.write(f"Employee: {selected_employee['name']} | Branch: {selected_employee.get('branch', '')} | Dept: {selected_employee.get('dept', '')}")
             st.write(f"Title: {selected_employee.get('job_title', '')} | Executive: {selected_employee.get('executive_email', '')}")
             st.divider()
 
-            questions_df = st.session_state.questions_df
-            if questions_df.empty:
-                st.warning("The Questions sheet is empty. Please add questions to the Google Sheet.")
+            st.markdown("### Employee Self-Evaluation")
+            employee_questions_df = load_employee_questions()
+
+            if selected_employee_self_eval:
+                st.success("Self-evaluation submitted. You can proceed with manager review.")
+                if employee_questions_df.empty:
+                    st.info("Employee questions are not configured, so the self-evaluation detail cannot be rendered.")
+                else:
+                    display_employee_response(
+                        employee_questions_df,
+                        parse_response_blob(selected_employee_self_eval.get('responses', {})),
+                        key_prefix=f"manager_self_eval_view_{selected_employee_id}_{selected_employee_self_eval.get('response_id', 'latest')}"
+                    )
             else:
-                questions_df = questions_df.fillna("")
-                answers = {}
-                questions_df['question_section'] = questions_df['question_section'].astype(str).fillna('').str.strip()
-                grouped_sections = questions_df.groupby('question_section', dropna=False, sort=False)
-
-                for section_name, section_rows in grouped_sections:
-                    if section_name:
-                        st.markdown(f"#### {section_name}")
-
-                    for _, question in section_rows.iterrows():
-                        header_text = str(question.get('header', '')).strip()
-                        if header_text:
-                            st.caption(header_text)
-
-                        key = f"q_{selected_employee_id}_{question['ID']}"
-                        if str(question['type']).strip().lower() == 'score':
-                            answers[str(question['ID'])] = st.radio(
-                                question['question'],
-                                options=['1', '2', '3'],
-                                key=key,
-                                index=0
-                            )
-                        else:
-                            answers[str(question['ID'])] = st.radio(
-                                question['question'],
-                                options=['Yes', 'No'],
-                                key=key,
-                                index=0
-                            )
-                        st.divider()
-
-                answered_score_questions = [qid for qid, val in answers.items() if val in ['1', '2', '3']]
-                current_score = 0
-                if answered_score_questions:
-                    score_values = [int(answers[qid]) for qid in answered_score_questions]
-                    current_score = int(round(sum(score_values) / len(score_values) * 100)) if score_values else 0
-
-                no_answers = sum(1 for qid, val in answers.items() if val == 'No')
-
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Current Score", f"{current_score}")
-                with col2:
-                    answered = len([v for v in answers.values() if v not in [None, '']])
-                    total_questions = len(questions_df)
-                    st.metric("Questions Answered", f"{answered}/{total_questions}")
-                with col3:
-                    st.metric("No Answers", no_answers)
-
-                st.divider()
-
-                st.markdown("### Additional Comments (Optional)")
-                manager_comment = st.text_area(
-                    "Add any additional comments or notes about this employee:",
-                    height=100,
-                    placeholder="Enter your comments here...",
-                    help="These comments will be included in the email sent to the employee but won't affect the score."
-                )
-
-                st.divider()
-
-                if st.button("Submit Scorecard", type='primary'):
-                    missing = [qid for qid, value in answers.items() if value in [None, '']]
-                    if missing:
-                        st.error("Please answer every question before submitting.")
+                st.warning("This employee has not submitted a self-evaluation yet. Manager review is disabled until they submit one.")
+                reminder_button_key = f"send_self_eval_reminder_{selected_employee_id}"
+                if st.button("Send Self-Evaluation Reminder Email", key=reminder_button_key):
+                    sent, recipient, app_url = send_self_evaluation_reminder_email(selected_employee, st.session_state.manager_name)
+                    if sent:
+                        st.success(f"Reminder email sent to {recipient}.")
                     else:
-                        manager_row = manager_employees.iloc[0]
-                        response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
-                        append_response(response_entry)
-
-                        stage_email = 'employee'
-                        sent, recipient, preview = send_stage_email(response_entry, stage_email)
-
-                        st.success("Scorecard submitted successfully.")
-                        if recipient:
-                            st.info(f"Verification email sent to employee: {recipient}")
-
-                        reviewed_employee_ids = set()
-                        if not responses_df.empty:
-                            manager_submissions = responses_df[
-                                responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
-                            ]
-                            reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
-
-                        remaining_employees = []
-                        for _, emp in manager_employees.iterrows():
-                            if str(emp['ID']) not in reviewed_employee_ids:
-                                remaining_employees.append(f"{emp['name']} ({emp['ID']})")
-
-                        if remaining_employees:
-                            st.warning(f"{len(remaining_employees)} employees still need review:")
-                            for emp in remaining_employees[:3]:
-                                st.write(f"• {emp}")
-                            if len(remaining_employees) > 3:
-                                st.write(f"• ... and {len(remaining_employees) - 3} more")
+                        st.warning("Could not send reminder email. SMTP may not be configured.")
+                        if app_url:
+                            st.info("Share this app link with the employee:")
+                            st.code(app_url)
                         else:
-                            st.success("All employees under your supervision have been reviewed.")
+                            st.info("Set app.url in Streamlit secrets so a direct login link can be included.")
 
-                        if not sent:
-                            st.warning("Email not configured. Copy approval links below and send manually:")
-                            approve_link, reject_link = get_stage_links(response_entry)
-                            st.code(f"Approve: {approve_link}")
-                            st.code(f"Reject: {reject_link}")
+            if selected_employee_self_eval:
+                questions_df = st.session_state.questions_df
+                if questions_df.empty:
+                    st.warning("The Questions sheet is empty. Please add questions to the Google Sheet.")
+                else:
+                    questions_df = questions_df.fillna("")
+                    answers = {}
+                    questions_df['question_section'] = questions_df['question_section'].astype(str).fillna('').str.strip()
+                    grouped_sections = questions_df.groupby('question_section', dropna=False, sort=False)
 
-                        time.sleep(3)
-                        st.rerun()
+                    for section_name, section_rows in grouped_sections:
+                        if section_name:
+                            st.markdown(f"#### {section_name}")
+
+                        for _, question in section_rows.iterrows():
+                            header_text = str(question.get('header', '')).strip()
+                            if header_text:
+                                st.caption(header_text)
+
+                            key = f"q_{selected_employee_id}_{question['ID']}"
+                            if str(question['type']).strip().lower() == 'score':
+                                answers[str(question['ID'])] = st.radio(
+                                    question['question'],
+                                    options=['1', '2', '3'],
+                                    key=key,
+                                    index=0
+                                )
+                            else:
+                                answers[str(question['ID'])] = st.radio(
+                                    question['question'],
+                                    options=['Yes', 'No'],
+                                    key=key,
+                                    index=0
+                                )
+                            st.divider()
+
+                    answered_score_questions = [qid for qid, val in answers.items() if val in ['1', '2', '3']]
+                    current_score = 0
+                    if answered_score_questions:
+                        score_values = [int(answers[qid]) for qid in answered_score_questions]
+                        current_score = int(round(sum(score_values) / len(score_values) * 100)) if score_values else 0
+
+                    no_answers = sum(1 for qid, val in answers.items() if val == 'No')
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Current Score", f"{current_score}")
+                    with col2:
+                        answered = len([v for v in answers.values() if v not in [None, '']])
+                        total_questions = len(questions_df)
+                        st.metric("Questions Answered", f"{answered}/{total_questions}")
+                    with col3:
+                        st.metric("No Answers", no_answers)
+
+                    st.divider()
+
+                    st.markdown("### Additional Comments (Optional)")
+                    manager_comment = st.text_area(
+                        "Add any additional comments or notes about this employee:",
+                        height=100,
+                        placeholder="Enter your comments here...",
+                        help="These comments will be included in the email sent to the employee but won't affect the score."
+                    )
+
+                    st.divider()
+
+                    if st.button("Submit Scorecard", type='primary'):
+                        missing = [qid for qid, value in answers.items() if value in [None, '']]
+                        if missing:
+                            st.error("Please answer every question before submitting.")
+                        else:
+                            manager_row = manager_employees.iloc[0]
+                            response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
+                            append_response(response_entry)
+
+                            stage_email = 'employee'
+                            sent, recipient, preview = send_stage_email(response_entry, stage_email)
+
+                            st.success("Scorecard submitted successfully.")
+                            if recipient:
+                                st.info(f"Verification email sent to employee: {recipient}")
+
+                            reviewed_employee_ids = set()
+                            if not responses_df.empty:
+                                manager_submissions = responses_df[
+                                    responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+                                ]
+                                reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
+
+                            remaining_employees = []
+                            for _, emp in manager_employees.iterrows():
+                                if str(emp['ID']) not in reviewed_employee_ids:
+                                    remaining_employees.append(f"{emp['name']} ({emp['ID']})")
+
+                            if remaining_employees:
+                                st.warning(f"{len(remaining_employees)} employees still need review:")
+                                for emp in remaining_employees[:3]:
+                                    st.write(f"• {emp}")
+                                if len(remaining_employees) > 3:
+                                    st.write(f"• ... and {len(remaining_employees) - 3} more")
+                            else:
+                                st.success("All employees under your supervision have been reviewed.")
+
+                            if not sent:
+                                st.warning("Email not configured. Copy approval links below and send manually:")
+                                approve_link, reject_link = get_stage_links(response_entry)
+                                st.code(f"Approve: {approve_link}")
+                                st.code(f"Reject: {reject_link}")
+
+                            time.sleep(3)
+                            st.rerun()
 
     with tab_status:
         st.markdown("### Your scorecard status dashboard")
@@ -1244,6 +1329,39 @@ if st.session_state.user_role == 'manager':
             st.error(f"Error loading scorecard status: {e}")
             import traceback
             st.code(traceback.format_exc())
+
+    with tab_self_eval:
+        st.markdown("### Employee self-evaluations")
+        st.caption("View submitted self-evaluations for employees assigned to you.")
+
+        if manager_employees.empty:
+            st.info("No employees found for this manager.")
+        elif employee_self_responses_df.empty:
+            st.info("No employee self-evaluations have been submitted yet.")
+        else:
+            employee_questions_df = load_employee_questions()
+            if employee_questions_df.empty:
+                st.warning("Employee_Questions sheet is empty. Add questions to render self-evaluation details.")
+            else:
+                for _, manager_employee in manager_employees.iterrows():
+                    employee_name = manager_employee.get('name', 'Unknown Employee')
+                    employee_id = str(manager_employee.get('ID', ''))
+                    employee_email = str(manager_employee.get('email', '')).strip().lower()
+
+                    self_eval = get_latest_employee_response_for_email(employee_self_responses_df, employee_email)
+                    title_suffix = "Submitted" if self_eval else "Not Submitted"
+
+                    with st.expander(f"{employee_name} ({employee_id}) • {title_suffix}"):
+                        st.write(f"Email: {manager_employee.get('email', '')}")
+                        if not self_eval:
+                            st.info("No self-evaluation submitted.")
+                        else:
+                            st.write(f"Last updated: {self_eval.get('updated_at', self_eval.get('created_at', ''))}")
+                            display_employee_response(
+                                employee_questions_df,
+                                parse_response_blob(self_eval.get('responses', {})),
+                                key_prefix=f"manager_tab_self_eval_{employee_id}_{self_eval.get('response_id', 'latest')}"
+                            )
 else:
     employee_row = st.session_state.employees_df[
         st.session_state.employees_df['email'].astype(str).str.lower() == st.session_state.employee_email
