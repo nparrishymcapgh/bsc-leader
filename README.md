@@ -232,6 +232,8 @@ Employee response behavior:
 - Managers cannot submit a scorecard for an employee until that employee has a self-evaluation on file.
 - If a self-evaluation is missing, the manager dashboard can send a reminder email to the employee with the app link.
 - Managers can view submitted self-evaluations at any time in the `Employee Self-Evaluations` tab.
+- Managers can toggle self-evaluation visibility on and off in both the scorecard submission view and the `Employee Self-Evaluations` tab.
+- When shown to managers, self-evaluations are displayed in a compact table format.
 
 ### 6. Test your setup (optional but recommended)
 

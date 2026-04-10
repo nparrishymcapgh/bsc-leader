@@ -671,6 +671,43 @@ def display_employee_response(question_rows, answers, key_prefix, read_only=True
             st.divider()
 
 
+def format_compact_employee_answer(question_type, answer):
+    value = ensure_employee_answer_shape(question_type, answer)
+    if isinstance(value, list):
+        cleaned_lines = [str(item).strip() for item in value if str(item).strip()]
+        return " | ".join(cleaned_lines) if cleaned_lines else "(No response)"
+
+    text_value = str(value).strip()
+    return text_value if text_value else "(No response)"
+
+
+def display_employee_response_compact(question_rows, answers):
+    prepared_questions = prepare_employee_questions(question_rows)
+    compact_rows = []
+
+    for _, question in prepared_questions.iterrows():
+        question_id = str(question['ID'])
+        response_key = str(question['_response_key'])
+        question_type = question.get('type', '')
+
+        stored_value = answers.get(response_key)
+        if stored_value is None:
+            stored_value = answers.get(question_id, [] if normalize_employee_question_type(question_type) == "three_line" else "")
+
+        compact_rows.append(
+            {
+                "Section": str(question.get('question_section', '')).strip() or "General",
+                "Question": str(question.get('question', '')).strip(),
+                "Response": format_compact_employee_answer(question_type, stored_value)
+            }
+        )
+
+    if compact_rows:
+        st.dataframe(pd.DataFrame(compact_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("No self-evaluation answers available to display.")
+
+
 def reset_login_state():
     st.session_state.logged_in = False
     st.session_state.user_role = ''
@@ -1128,11 +1165,16 @@ if st.session_state.user_role == 'manager':
                 if employee_questions_df.empty:
                     st.info("Employee questions are not configured, so the self-evaluation detail cannot be rendered.")
                 else:
-                    display_employee_response(
-                        employee_questions_df,
-                        parse_response_blob(selected_employee_self_eval.get('responses', {})),
-                        key_prefix=f"manager_self_eval_view_{selected_employee_id}_{selected_employee_self_eval.get('response_id', 'latest')}"
+                    show_selected_self_eval = st.toggle(
+                        "Show employee self-evaluation",
+                        value=False,
+                        key=f"manager_toggle_self_eval_{selected_employee_id}"
                     )
+                    if show_selected_self_eval:
+                        display_employee_response_compact(
+                            employee_questions_df,
+                            parse_response_blob(selected_employee_self_eval.get('responses', {}))
+                        )
             else:
                 st.warning("This employee has not submitted a self-evaluation yet. Manager review is disabled until they submit one.")
                 reminder_button_key = f"send_self_eval_reminder_{selected_employee_id}"
@@ -1334,6 +1376,12 @@ if st.session_state.user_role == 'manager':
         st.markdown("### Employee self-evaluations")
         st.caption("View submitted self-evaluations for employees assigned to you.")
 
+        show_all_self_eval_details = st.toggle(
+            "Show self-evaluation details",
+            value=False,
+            key="manager_toggle_all_self_eval_details"
+        )
+
         if manager_employees.empty:
             st.info("No employees found for this manager.")
         elif employee_self_responses_df.empty:
@@ -1357,11 +1405,11 @@ if st.session_state.user_role == 'manager':
                             st.info("No self-evaluation submitted.")
                         else:
                             st.write(f"Last updated: {self_eval.get('updated_at', self_eval.get('created_at', ''))}")
-                            display_employee_response(
-                                employee_questions_df,
-                                parse_response_blob(self_eval.get('responses', {})),
-                                key_prefix=f"manager_tab_self_eval_{employee_id}_{self_eval.get('response_id', 'latest')}"
-                            )
+                            if show_all_self_eval_details:
+                                display_employee_response_compact(
+                                    employee_questions_df,
+                                    parse_response_blob(self_eval.get('responses', {}))
+                                )
 else:
     employee_row = st.session_state.employees_df[
         st.session_state.employees_df['email'].astype(str).str.lower() == st.session_state.employee_email
