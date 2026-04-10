@@ -543,12 +543,37 @@ def ensure_employee_answer_shape(question_type, answer):
     return str(answer or "")
 
 
-def render_employee_question_inputs(question_rows, key_prefix):
-    answers = {}
-    prepared_questions = question_rows.fillna("").copy()
+def prepare_employee_questions(question_rows):
+    prepared_questions = question_rows.fillna("").copy().reset_index(drop=True)
 
     if 'question_section' not in prepared_questions.columns:
         prepared_questions['question_section'] = ""
+
+    if 'ID' not in prepared_questions.columns:
+        prepared_questions['ID'] = ""
+
+    id_counts = prepared_questions['ID'].astype(str).str.strip().value_counts()
+    id_occurrences = {}
+    response_keys = []
+
+    for row_index, raw_id in enumerate(prepared_questions['ID'].astype(str).str.strip()):
+        base_id = raw_id or f"row_{row_index + 1}"
+        id_occurrences[base_id] = id_occurrences.get(base_id, 0) + 1
+
+        if raw_id and id_counts.get(raw_id, 0) == 1:
+            response_key = raw_id
+        else:
+            response_key = f"{base_id}__{id_occurrences[base_id]}"
+
+        response_keys.append(response_key)
+
+    prepared_questions['_response_key'] = response_keys
+    return prepared_questions
+
+
+def render_employee_question_inputs(question_rows, key_prefix):
+    answers = {}
+    prepared_questions = prepare_employee_questions(question_rows)
 
     grouped_sections = prepared_questions.groupby('question_section', dropna=False, sort=False)
 
@@ -558,6 +583,7 @@ def render_employee_question_inputs(question_rows, key_prefix):
 
         for _, question in section_rows.iterrows():
             question_id = str(question['ID'])
+            response_key = str(question['_response_key'])
             question_type = normalize_employee_question_type(question.get('type', ''))
 
             st.markdown(f"**{question['question']}**")
@@ -567,14 +593,14 @@ def render_employee_question_inputs(question_rows, key_prefix):
                     line_values.append(
                         st.text_input(
                             f"Line {line_number}",
-                            key=f"{key_prefix}_{question_id}_line_{line_number}"
+                            key=f"{key_prefix}_{response_key}_line_{line_number}"
                         )
                     )
-                answers[question_id] = line_values
+                answers[response_key] = line_values
             else:
-                answers[question_id] = st.text_area(
+                answers[response_key] = st.text_area(
                     "Response",
-                    key=f"{key_prefix}_{question_id}",
+                    key=f"{key_prefix}_{response_key}",
                     height=120,
                     label_visibility='collapsed'
                 )
@@ -584,10 +610,7 @@ def render_employee_question_inputs(question_rows, key_prefix):
 
 
 def display_employee_response(question_rows, answers, key_prefix, read_only=True):
-    prepared_questions = question_rows.fillna("").copy()
-
-    if 'question_section' not in prepared_questions.columns:
-        prepared_questions['question_section'] = ""
+    prepared_questions = prepare_employee_questions(question_rows)
 
     grouped_sections = prepared_questions.groupby('question_section', dropna=False, sort=False)
 
@@ -597,8 +620,13 @@ def display_employee_response(question_rows, answers, key_prefix, read_only=True
 
         for _, question in section_rows.iterrows():
             question_id = str(question['ID'])
+            response_key = str(question['_response_key'])
             question_type = normalize_employee_question_type(question.get('type', ''))
-            value = ensure_employee_answer_shape(question.get('type', ''), answers.get(question_id, [] if question_type == "three_line" else ""))
+            stored_value = answers.get(response_key)
+            if stored_value is None:
+                stored_value = answers.get(question_id, [] if question_type == "three_line" else "")
+
+            value = ensure_employee_answer_shape(question.get('type', ''), stored_value)
 
             st.markdown(f"**{question['question']}**")
             if question_type == "three_line":
@@ -607,7 +635,7 @@ def display_employee_response(question_rows, answers, key_prefix, read_only=True
                         f"Line {line_number}",
                         value=line_value,
                         disabled=read_only,
-                        key=f"{key_prefix}_{question_id}_line_{line_number}"
+                        key=f"{key_prefix}_{response_key}_line_{line_number}"
                     )
             else:
                 st.text_area(
@@ -616,7 +644,7 @@ def display_employee_response(question_rows, answers, key_prefix, read_only=True
                     height=120,
                     disabled=read_only,
                     label_visibility='collapsed',
-                    key=f"{key_prefix}_{question_id}"
+                    key=f"{key_prefix}_{response_key}"
                 )
             st.divider()
 
