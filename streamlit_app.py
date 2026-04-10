@@ -84,6 +84,22 @@ GOOGLE_SHEET_ID = "1DfYJwlKy01G0tcZ11FUen4fPjSnK9vWT33a2sKfRKko"
 EMPLOYEES_TAB = "Employees"
 QUESTIONS_TAB = "Questions"
 RESPONSES_TAB = "Responses"
+EMPLOYEE_QUESTIONS_TAB = "Employee_Questions"
+EMPLOYEE_RESPONSES_TAB = "Employee_Responses"
+
+MANAGER_RESPONSE_COLUMNS = [
+    "response_id", "created_at", "updated_at", "manager_email", "manager_name",
+    "employee_id", "employee_name", "employee_email", "branch", "dept",
+    "job_title", "executive_email", "questions_score", "number_of_nos",
+    "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
+    "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
+    "status", "employee_token", "manager_token", "executive_token"
+]
+
+EMPLOYEE_RESPONSE_COLUMNS = [
+    "response_id", "created_at", "updated_at", "employee_id", "employee_name",
+    "employee_email", "branch", "dept", "job_title", "responses", "status"
+]
 
 # Optional Streamlit secrets values:
 # [gcp_service_account]
@@ -140,6 +156,37 @@ def load_sheet(tab_name):
         st.error(f"Unable to load `{tab_name}` sheet: {exc}")
         return pd.DataFrame()
 
+
+def ensure_dataframe_columns(df, expected_columns):
+    if df.empty:
+        return pd.DataFrame(columns=expected_columns)
+
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = ""
+
+    return df
+
+
+def column_letter(index):
+    result = ""
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def ensure_sheet_headers(worksheet, headers):
+    existing_headers = worksheet.row_values(1)
+    if not existing_headers:
+        worksheet.append_row(headers)
+        return worksheet
+
+    if existing_headers != headers:
+        worksheet.update(f"A1:{column_letter(len(headers))}1", [headers])
+
+    return worksheet
+
 def load_responses():
     """Load responses from the Responses sheet."""
     try:
@@ -147,22 +194,7 @@ def load_responses():
         worksheet = ensure_responses_sheet(spreadsheet)
         records = worksheet.get_all_records()
         df = pd.DataFrame(records)
-
-        # Ensure all expected columns exist
-        expected_columns = [
-            "response_id", "created_at", "updated_at", "manager_email", "manager_name",
-            "employee_id", "employee_name", "employee_email", "branch", "dept",
-            "job_title", "executive_email", "questions_score", "number_of_nos",
-            "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
-            "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
-            "status", "employee_token", "manager_token", "executive_token"
-        ]
-        
-        for col in expected_columns:
-            if col not in df.columns:
-                df[col] = ""
-
-        return df
+        return ensure_dataframe_columns(df, MANAGER_RESPONSE_COLUMNS)
         
     except Exception as e:
         st.error("Could not load responses from the sheet.")
@@ -170,40 +202,38 @@ def load_responses():
         return pd.DataFrame()
 
 def ensure_responses_sheet(spreadsheet):
-    headers = [
-        "response_id",
-        "created_at",
-        "updated_at",
-        "manager_email",
-        "manager_name",
-        "employee_id",
-        "employee_name",
-        "employee_email",
-        "branch",
-        "dept",
-        "job_title",
-        "executive_email",
-        "questions_score",
-        "number_of_nos",
-        "responses",
-        "comments",
-        "employee_agree",
-        "manager_agree",
-        "executive_agree",
-        "employee_agree_ts",
-        "manager_agree_ts",
-        "executive_agree_ts",
-        "status",
-        "employee_token",
-        "manager_token",
-        "executive_token"
-    ]
     try:
         worksheet = spreadsheet.worksheet(RESPONSES_TAB)
     except gspread.exceptions.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(RESPONSES_TAB, rows=1000, cols=len(headers))
-        worksheet.append_row(headers)
-    return worksheet
+        worksheet = spreadsheet.add_worksheet(RESPONSES_TAB, rows=1000, cols=len(MANAGER_RESPONSE_COLUMNS))
+        worksheet.append_row(MANAGER_RESPONSE_COLUMNS)
+        return worksheet
+
+    return ensure_sheet_headers(worksheet, MANAGER_RESPONSE_COLUMNS)
+
+
+def ensure_employee_responses_sheet(spreadsheet):
+    try:
+        worksheet = spreadsheet.worksheet(EMPLOYEE_RESPONSES_TAB)
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(EMPLOYEE_RESPONSES_TAB, rows=1000, cols=len(EMPLOYEE_RESPONSE_COLUMNS))
+        worksheet.append_row(EMPLOYEE_RESPONSE_COLUMNS)
+        return worksheet
+
+    return ensure_sheet_headers(worksheet, EMPLOYEE_RESPONSE_COLUMNS)
+
+
+def load_employee_responses():
+    try:
+        spreadsheet = get_spreadsheet()
+        worksheet = ensure_employee_responses_sheet(spreadsheet)
+        records = worksheet.get_all_records()
+        df = pd.DataFrame(records)
+        return ensure_dataframe_columns(df, EMPLOYEE_RESPONSE_COLUMNS)
+    except Exception as e:
+        st.error("Could not load employee responses from the sheet.")
+        st.error(str(e))
+        return pd.DataFrame()
 
 # ============================================================================
 # EMAIL UTILITIES
@@ -293,19 +323,7 @@ def find_response_by_id(response_id):
     spreadsheet = get_spreadsheet()
     worksheet = ensure_responses_sheet(spreadsheet)
     records = worksheet.get_all_records()
-    df = pd.DataFrame(records)
-    # Ensure all expected columns exist, even if sheet is empty
-    expected_columns = [
-        "response_id", "created_at", "updated_at", "manager_email", "manager_name",
-        "employee_id", "employee_name", "employee_email", "branch", "dept",
-        "job_title", "executive_email", "questions_score", "number_of_nos",
-        "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
-        "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
-        "status", "employee_token", "manager_token", "executive_token"
-    ]
-    for col in expected_columns:
-        if col not in df.columns:
-            df[col] = ""
+    df = ensure_dataframe_columns(pd.DataFrame(records), MANAGER_RESPONSE_COLUMNS)
     if df.empty:
         return None, None, None
     matches = df[df['response_id'] == response_id]
@@ -321,19 +339,7 @@ def update_response(response_id, updates):
         spreadsheet = get_spreadsheet()
         worksheet = ensure_responses_sheet(spreadsheet)
         records = worksheet.get_all_records()
-        df = pd.DataFrame(records)
-        # Ensure all expected columns exist
-        expected_columns = [
-            "response_id", "created_at", "updated_at", "manager_email", "manager_name",
-            "employee_id", "employee_name", "employee_email", "branch", "dept",
-            "job_title", "executive_email", "questions_score", "number_of_nos",
-            "responses", "comments", "employee_agree", "manager_agree", "executive_agree",
-            "employee_agree_ts", "manager_agree_ts", "executive_agree_ts",
-            "status", "employee_token", "manager_token", "executive_token"
-        ]
-        for col in expected_columns:
-            if col not in df.columns:
-                df[col] = ""
+        df = ensure_dataframe_columns(pd.DataFrame(records), MANAGER_RESPONSE_COLUMNS)
         
         if df.empty:
             return False
@@ -351,12 +357,12 @@ def update_response(response_id, updates):
             if key not in header:
                 header.append(key)
                 # Update the worksheet header row with the new column
-                worksheet.update(f"{chr(64 + len(header))}{1}", [[key]])
+                worksheet.update(f"{column_letter(len(header))}{1}", [[key]])
                 row_data[key] = value
             row_data[key] = value
 
         ordered_row = [row_data.get(col, "") for col in header]
-        update_range = f"A{row_index}:{chr(64 + len(header))}{row_index}"
+        update_range = f"A{row_index}:{column_letter(len(header))}{row_index}"
         worksheet.update(update_range, [ordered_row])
 
         return True
@@ -371,6 +377,52 @@ def append_response(row):
     header = worksheet.row_values(1)
     ordered_row = [row.get(col, "") for col in header]
     worksheet.append_row(ordered_row)
+
+
+def find_employee_response_by_email(employee_email):
+    spreadsheet = get_spreadsheet()
+    worksheet = ensure_employee_responses_sheet(spreadsheet)
+    records = worksheet.get_all_records()
+    df = ensure_dataframe_columns(pd.DataFrame(records), EMPLOYEE_RESPONSE_COLUMNS)
+    if df.empty:
+        return None, None, None
+
+    matches = df[df['employee_email'].astype(str).str.strip().str.lower() == employee_email.strip().lower()]
+    if matches.empty:
+        return None, None, df
+
+    row = matches.sort_values('created_at', ascending=False).iloc[0]
+    row_index = matches.sort_values('created_at', ascending=False).index[0] + 2
+    return row.to_dict(), row_index, df
+
+
+def append_employee_response(row):
+    spreadsheet = get_spreadsheet()
+    worksheet = ensure_employee_responses_sheet(spreadsheet)
+    header = worksheet.row_values(1)
+    ordered_row = [row.get(col, "") for col in header]
+    worksheet.append_row(ordered_row)
+
+
+def delete_employee_response(response_id):
+    try:
+        spreadsheet = get_spreadsheet()
+        worksheet = ensure_employee_responses_sheet(spreadsheet)
+        records = worksheet.get_all_records()
+        df = ensure_dataframe_columns(pd.DataFrame(records), EMPLOYEE_RESPONSE_COLUMNS)
+        if df.empty or 'response_id' not in df.columns:
+            return False
+
+        matches = df[df['response_id'] == response_id]
+        if matches.empty:
+            return False
+
+        row_index = matches.index[0] + 2
+        worksheet.delete_rows(row_index)
+        return True
+    except Exception as e:
+        st.error(f"Unable to delete employee response: {e}")
+        return False
 
 
 def delete_response(response_id):
@@ -431,11 +483,151 @@ def create_response_entry(manager, employee, answers, comment=""):
     return entry
 
 
-def load_employee_questions():
+def create_employee_response_entry(employee, answers):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return {
+        "response_id": str(uuid.uuid4()),
+        "created_at": now,
+        "updated_at": now,
+        "employee_id": str(employee['ID']),
+        "employee_name": employee['name'],
+        "employee_email": employee['email'],
+        "branch": employee.get('branch', ""),
+        "dept": employee.get('dept', ""),
+        "job_title": employee.get('job_title', ""),
+        "responses": json.dumps(answers),
+        "status": "Submitted"
+    }
+
+
+def load_manager_questions():
     df = load_sheet(QUESTIONS_TAB)
     if df.empty:
         st.warning("Questions sheet is empty or missing. Please check the Google Sheet.")
     return df
+
+
+def load_employee_questions():
+    df = load_sheet(EMPLOYEE_QUESTIONS_TAB)
+    if df.empty:
+        st.warning("Employee_Questions sheet is empty or missing. Please check the Google Sheet.")
+    return df
+
+
+def parse_response_blob(response_blob):
+    try:
+        return json.loads(response_blob) if isinstance(response_blob, str) else response_blob
+    except Exception:
+        return {}
+
+
+def normalize_employee_question_type(question_type):
+    normalized = str(question_type).strip().lower().replace("-", " ")
+    return "three_line" if normalized == "three line" else "multi_line"
+
+
+def employee_answer_complete(answer):
+    if isinstance(answer, list):
+        return any(str(line).strip() for line in answer)
+    return bool(str(answer).strip())
+
+
+def ensure_employee_answer_shape(question_type, answer):
+    if normalize_employee_question_type(question_type) == "three_line":
+        if isinstance(answer, list):
+            values = [str(item) for item in answer[:3]]
+        else:
+            values = []
+        values.extend([""] * (3 - len(values)))
+        return values[:3]
+    return str(answer or "")
+
+
+def render_employee_question_inputs(question_rows, key_prefix):
+    answers = {}
+    prepared_questions = question_rows.fillna("").copy()
+
+    if 'question_section' not in prepared_questions.columns:
+        prepared_questions['question_section'] = ""
+
+    grouped_sections = prepared_questions.groupby('question_section', dropna=False, sort=False)
+
+    for section_name, section_rows in grouped_sections:
+        if section_name:
+            st.markdown(f"#### {section_name}")
+
+        for _, question in section_rows.iterrows():
+            question_id = str(question['ID'])
+            question_type = normalize_employee_question_type(question.get('type', ''))
+
+            st.markdown(f"**{question['question']}**")
+            if question_type == "three_line":
+                line_values = []
+                for line_number in range(1, 4):
+                    line_values.append(
+                        st.text_input(
+                            f"Line {line_number}",
+                            key=f"{key_prefix}_{question_id}_line_{line_number}"
+                        )
+                    )
+                answers[question_id] = line_values
+            else:
+                answers[question_id] = st.text_area(
+                    "Response",
+                    key=f"{key_prefix}_{question_id}",
+                    height=120,
+                    label_visibility='collapsed'
+                )
+            st.divider()
+
+    return answers
+
+
+def display_employee_response(question_rows, answers, key_prefix, read_only=True):
+    prepared_questions = question_rows.fillna("").copy()
+
+    if 'question_section' not in prepared_questions.columns:
+        prepared_questions['question_section'] = ""
+
+    grouped_sections = prepared_questions.groupby('question_section', dropna=False, sort=False)
+
+    for section_name, section_rows in grouped_sections:
+        if section_name:
+            st.markdown(f"#### {section_name}")
+
+        for _, question in section_rows.iterrows():
+            question_id = str(question['ID'])
+            question_type = normalize_employee_question_type(question.get('type', ''))
+            value = ensure_employee_answer_shape(question.get('type', ''), answers.get(question_id, [] if question_type == "three_line" else ""))
+
+            st.markdown(f"**{question['question']}**")
+            if question_type == "three_line":
+                for line_number, line_value in enumerate(value, start=1):
+                    st.text_input(
+                        f"Line {line_number}",
+                        value=line_value,
+                        disabled=read_only,
+                        key=f"{key_prefix}_{question_id}_line_{line_number}"
+                    )
+            else:
+                st.text_area(
+                    "Response",
+                    value=value,
+                    height=120,
+                    disabled=read_only,
+                    label_visibility='collapsed',
+                    key=f"{key_prefix}_{question_id}"
+                )
+            st.divider()
+
+
+def reset_login_state():
+    st.session_state.logged_in = False
+    st.session_state.user_role = ''
+    st.session_state.manager_email = ''
+    st.session_state.manager_name = ''
+    st.session_state.employee_email = ''
+    st.session_state.employee_name = ''
 
 # ============================================================================
 # APPROVAL WORKFLOW
@@ -457,10 +649,10 @@ def get_stage_links(response):
 
 
 def send_stage_email(response, stage):
-    question_rows = load_employee_questions()
+    question_rows = load_manager_questions()
     questions_for_email = question_rows.copy()
     try:
-        answers = json.loads(response['responses']) if isinstance(response['responses'], str) else response['responses']
+        answers = parse_response_blob(response['responses'])
     except Exception:
         answers = {}
 
@@ -670,6 +862,7 @@ if action and response_id and token:
 # Debug mode bypasses login and shows all data
 if debug_mode:
     st.session_state.logged_in = True
+    st.session_state.user_role = 'manager'
     st.session_state.manager_email = 'debug@mode.com'
     st.session_state.manager_name = 'Debug User'
     st.session_state.data_loaded = getattr(st.session_state, 'data_loaded', False)
@@ -686,10 +879,17 @@ if debug_mode:
     responses_df['employee_id'] = responses_df['employee_id'].astype(str)
 
 if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.manager_email = ''
-    st.session_state.manager_name = ''
+    reset_login_state()
     st.session_state.data_loaded = False
+
+if 'user_role' not in st.session_state:
+    st.session_state.user_role = ''
+
+if 'employee_email' not in st.session_state:
+    st.session_state.employee_email = ''
+
+if 'employee_name' not in st.session_state:
+    st.session_state.employee_name = ''
 
 if not st.session_state.data_loaded:
     with st.spinner("Loading data..."):
@@ -702,285 +902,377 @@ if not st.session_state.data_loaded:
         st.session_state.data_loaded = True
 
 if not st.session_state.logged_in:
-    st.subheader("🔐 Manager Login")
-    login_email = st.text_input("Enter your manager email:", placeholder="manager@example.com").strip().lower()
-    if st.button("Login", type='primary'):
-        if login_email and login_email in st.session_state.employees_df['manager_email'].astype(str).str.lower().values:
-            manager_row = st.session_state.employees_df[st.session_state.employees_df['manager_email'].astype(str).str.lower() == login_email].iloc[0]
-            st.session_state.logged_in = True
-            st.session_state.manager_email = login_email
-            st.session_state.manager_name = manager_row.get('manager_name', login_email)
-            st.rerun()
-        else:
-            st.error("Manager email not found. Please enter an email listed in the Employees sheet.")
+    manager_col, employee_col = st.columns(2)
+
+    with manager_col:
+        st.subheader("Manager Login")
+        manager_login_email = st.text_input(
+            "Enter your manager email:",
+            placeholder="manager@example.com",
+            key='manager_login_email'
+        ).strip().lower()
+        if st.button("Login as Manager", type='primary'):
+            manager_emails = st.session_state.employees_df['manager_email'].astype(str).str.lower().values
+            if manager_login_email and manager_login_email in manager_emails:
+                manager_row = st.session_state.employees_df[
+                    st.session_state.employees_df['manager_email'].astype(str).str.lower() == manager_login_email
+                ].iloc[0]
+                st.session_state.logged_in = True
+                st.session_state.user_role = 'manager'
+                st.session_state.manager_email = manager_login_email
+                st.session_state.manager_name = manager_row.get('manager_name', manager_login_email)
+                st.session_state.employee_email = ''
+                st.session_state.employee_name = ''
+                st.rerun()
+            else:
+                st.error("Manager email not found. Please enter an email listed in the Employees sheet.")
+
+    with employee_col:
+        st.subheader("Employee Login")
+        employee_login_email = st.text_input(
+            "Enter your employee email:",
+            placeholder="employee@example.com",
+            key='employee_login_email'
+        ).strip().lower()
+        if st.button("Login as Employee", type='primary'):
+            employee_emails = st.session_state.employees_df['email'].astype(str).str.lower().values
+            if employee_login_email and employee_login_email in employee_emails:
+                employee_row = st.session_state.employees_df[
+                    st.session_state.employees_df['email'].astype(str).str.lower() == employee_login_email
+                ].iloc[0]
+                st.session_state.logged_in = True
+                st.session_state.user_role = 'employee'
+                st.session_state.employee_email = employee_login_email
+                st.session_state.employee_name = employee_row.get('name', employee_login_email)
+                st.session_state.manager_email = ''
+                st.session_state.manager_name = ''
+                st.rerun()
+            else:
+                st.error("Employee email not found. Please enter an email listed in the Employees sheet.")
 
     st.stop()
 
-st.sidebar.markdown(f"**Signed in as:** {st.session_state.manager_name} ({st.session_state.manager_email})")
+if st.session_state.user_role == 'manager':
+    sidebar_identity = f"{st.session_state.manager_name} ({st.session_state.manager_email})"
+else:
+    sidebar_identity = f"{st.session_state.employee_name} ({st.session_state.employee_email})"
+
+st.sidebar.markdown(f"**Signed in as:** {sidebar_identity}")
+st.sidebar.caption(f"Role: {st.session_state.user_role.title()}")
 if st.sidebar.button("Logout"):
-    st.session_state.logged_in = False
-    st.session_state.manager_email = ''
-    st.session_state.manager_name = ''
+    reset_login_state()
     st.rerun()
 
-if debug_mode:
-    manager_employees = st.session_state.employees_df  # Show all employees in debug mode
-else:
-    manager_employees = st.session_state.employees_df[st.session_state.employees_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
+if st.session_state.user_role == 'manager':
+    if debug_mode:
+        manager_employees = st.session_state.employees_df
+    else:
+        manager_employees = st.session_state.employees_df[
+            st.session_state.employees_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+        ]
 
-responses_df = load_responses()
-responses_df['employee_id'] = responses_df['employee_id'].astype(str)
+    responses_df = load_responses()
+    responses_df['employee_id'] = responses_df['employee_id'].astype(str)
 
-# Check if manager has any records in the system
-manager_has_responses = not responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email].empty if not debug_mode else True
+    manager_has_responses = not responses_df[
+        responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+    ].empty if not debug_mode else True
 
-if not debug_mode and manager_employees.empty and not manager_has_responses:
-    st.warning("⚠️ Manager email not found in the Employees sheet.")
-    st.info("You can still view scorecard statuses for any scorecards you've submitted.")
-    # Continue instead of stopping - allow access to status page
+    if not debug_mode and manager_employees.empty and not manager_has_responses:
+        st.warning("Manager email not found in the Employees sheet.")
+        st.info("You can still view scorecard statuses for any scorecards you've submitted.")
 
-st.subheader("📋 Manager Dashboard")
+    st.subheader("Manager Dashboard")
 
-tab_new, tab_status = st.tabs(["Submit Scorecard", "Scorecard Status"])
+    tab_new, tab_status = st.tabs(["Submit Scorecard", "Scorecard Status"])
 
-with tab_new:
-    st.markdown("### Submit a new balanced score card")
-    can_submit = True
+    with tab_new:
+        st.markdown("### Submit a new balanced score card")
+        can_submit = True
 
-    if debug_mode and manager_employees.empty:
-        st.info("No employees found matching current filters.")
-        can_submit = False
-    elif not debug_mode and manager_employees.empty:
-        st.info("📋 You don't have any employees assigned as a manager in the system.")
-        st.info("However, you can still view the status of any scorecards you've submitted using the 'Scorecard Status' tab.")
-        can_submit = False
-
-    if can_submit:
-        # Filter out employees that have already been reviewed
-        reviewed_employee_ids = set()
-        if not responses_df.empty:
-            if debug_mode:
-                # In debug mode, don't filter by manager - show all submissions
-                reviewed_employee_ids = set(responses_df['employee_id'].astype(str).unique())
-            else:
-                manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-                reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
-
-        if debug_mode:
-            # In debug mode, show all employees
-            available_employees = st.session_state.employees_df[~st.session_state.employees_df['ID'].astype(str).isin(reviewed_employee_ids)]
-        else:
-            available_employees = manager_employees[~manager_employees['ID'].astype(str).isin(reviewed_employee_ids)]
-
-        if available_employees.empty:
-            if debug_mode:
-                st.success("🎉 **All employees in the system have been reviewed!**")
-            else:
-                st.success("🎉 **All employees under your supervision have been reviewed!**")
-            st.info("You have successfully completed performance reviews for all your direct reports.")
+        if debug_mode and manager_employees.empty:
+            st.info("No employees found matching current filters.")
+            can_submit = False
+        elif not debug_mode and manager_employees.empty:
+            st.info("You don't have any employees assigned as a manager in the system.")
+            st.info("You can still view the status of any scorecards you've submitted using the Scorecard Status tab.")
             can_submit = False
 
-    if can_submit:
-        selected_employee_id = st.selectbox(
-            "Select employee to rate",
-            available_employees['ID'].astype(str).tolist(),
-            format_func=lambda eid: f"{available_employees[available_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
-        )
-        selected_employee = available_employees[available_employees['ID'].astype(str) == selected_employee_id].iloc[0]
-        st.write(f"Employee: {selected_employee['name']} | Branch: {selected_employee.get('branch', '')} | Dept: {selected_employee.get('dept', '')}")
-        st.write(f"Title: {selected_employee.get('job_title', '')} | Executive: {selected_employee.get('executive_email', '')}")
-        st.divider()
-
-        questions_df = st.session_state.questions_df
-        if questions_df.empty:
-            st.warning("The Questions sheet is empty. Please add questions to the Google Sheet.")
-        else:
-            questions_df = questions_df.fillna("")
-            answers = {}
-
-            # Live score calculation
-            score_questions = questions_df[questions_df['type'].astype(str).str.strip().str.lower() == 'score']
-            total_score_questions = len(score_questions)
-
-            questions_df['question_section'] = questions_df['question_section'].astype(str).fillna('').str.strip()
-            grouped_sections = questions_df.groupby('question_section', dropna=False, sort=False)
-
-            for section_name, section_rows in grouped_sections:
-                if section_name:
-                    st.markdown(f"#### {section_name}")
-
-                for _, question in section_rows.iterrows():
-                    header_text = str(question.get('header', '')).strip()
-                    if header_text:
-                        st.caption(header_text)
-
-                    key = f"q_{selected_employee_id}_{question['ID']}"
-                    if str(question['type']).strip().lower() == 'score':
-                        answers[str(question['ID'])] = st.radio(
-                            question['question'],
-                            options=['1', '2', '3'],
-                            key=key,
-                            index=0
-                        )
-                    else:
-                        answers[str(question['ID'])] = st.radio(
-                            question['question'],
-                            options=['Yes', 'No'],
-                            key=key,
-                            index=0
-                        )
-                    st.divider()
-
-            # Calculate and display current score
-            answered_score_questions = [qid for qid, val in answers.items() if val in ['1', '2', '3']]
-            current_score = 0
-            if answered_score_questions:
-                score_values = [int(answers[qid]) for qid in answered_score_questions]
-                current_score = int(round(sum(score_values) / len(score_values) * 100)) if score_values else 0
-
-            # Count "No" answers
-            no_answers = sum(1 for qid, val in answers.items() if val == 'No')
-
-            # Display current progress
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Current Score", f"{current_score}")
-            with col2:
-                answered = len([v for v in answers.values() if v not in [None, '']])
-                total_questions = len(questions_df)
-                st.metric("Questions Answered", f"{answered}/{total_questions}")
-            with col3:
-                st.metric("No Answers", no_answers)
-
-            st.divider()
-
-            # Comment field
-            st.markdown("### 📝 Additional Comments (Optional)")
-            manager_comment = st.text_area(
-                "Add any additional comments or notes about this employee:",
-                height=100,
-                placeholder="Enter your comments here...",
-                help="These comments will be included in the email sent to the employee but won't affect the score."
-            )
-
-            st.divider()
-
-            if st.button("Submit Scorecard", type='primary'):
-                missing = [qid for qid, value in answers.items() if value in [None, '']]
-                if missing:
-                    st.error("Please answer every question before submitting.")
+        if can_submit:
+            reviewed_employee_ids = set()
+            if not responses_df.empty:
+                if debug_mode:
+                    reviewed_employee_ids = set(responses_df['employee_id'].astype(str).unique())
                 else:
-                    # Create success message
-                    manager_row = manager_employees.iloc[0]
-                    response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
+                    manager_submissions = responses_df[
+                        responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+                    ]
+                    reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
 
-                    # Submit the response
-                    append_response(response_entry)
-
-                    # Send email
-                    stage_email = 'employee'
-                    sent, recipient, preview = send_stage_email(response_entry, stage_email)
-
-                    # Success feedback
-                    st.success("**Scorecard Submitted Successfully!**")
-                    st.info(f"Verification email sent to employee: **{recipient}**")
-
-                    # Check if there are more employees to review
-                    reviewed_employee_ids = set()
-                    if not responses_df.empty:
-                        manager_submissions = responses_df[responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email]
-                        reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
-
-                    remaining_employees = []
-                    for _, emp in manager_employees.iterrows():
-                        if str(emp['ID']) not in reviewed_employee_ids:
-                            remaining_employees.append(f"{emp['name']} ({emp['ID']})")
-
-                    if remaining_employees:
-                        st.warning(f"**{len(remaining_employees)} employees still need review:**")
-                        for emp in remaining_employees[:3]:  # Show first 3
-                            st.write(f"• {emp}")
-                        if len(remaining_employees) > 3:
-                            st.write(f"• ... and {len(remaining_employees) - 3} more")
-                    else:
-                        st.success("🎉 **All employees under your supervision have been reviewed!**")
-
-                    if not sent:
-                        st.warning("**Email not configured** - Copy approval links below and send manually:")
-                        approve_link, reject_link = get_stage_links(response_entry)
-                        st.code(f"Approve: {approve_link}")
-                        st.code(f"Reject: {reject_link}")
-
-                    # Auto-refresh after 3 seconds to show updated status
-                    time.sleep(3)
-                    st.rerun()
-
-with tab_status:
-    st.markdown("### Your scorecard status dashboard")
-    st.caption("Track approvals and progress for scorecards you've submitted.")
-
-    try:
-        current_responses_df = load_responses()
-        manager_email = st.session_state.get('manager_email', '').strip().lower()
-
-        if current_responses_df.empty:
-            st.info("No scorecards submitted yet.")
-        else:
             if debug_mode:
-                manager_responses = current_responses_df.copy()
-            else:
-                manager_responses = current_responses_df[
-                    current_responses_df['manager_email'].astype(str).str.strip().str.lower() == manager_email
-                ].copy()
-
-            if manager_responses.empty:
-                st.info("No scorecards found for your manager email.")
-            else:
-                manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
-
-                total_count = len(manager_responses)
-                approved_count = int((manager_responses['status'].astype(str) == 'Approved').sum())
-                pending_count = int(manager_responses['status'].astype(str).str.startswith('Pending').sum())
-                rejected_count = int(manager_responses['status'].astype(str).str.contains('Rejected').sum())
-
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric("Total Submitted", total_count)
-                k2.metric("Approved", approved_count)
-                k3.metric("Pending", pending_count)
-                k4.metric("Rejected", rejected_count)
-
-                st.markdown("#### Submission Summary")
-                summary_columns = [
-                    'employee_name', 'employee_email', 'status',
-                    'questions_score', 'number_of_nos', 'created_at', 'updated_at'
+                available_employees = st.session_state.employees_df[
+                    ~st.session_state.employees_df['ID'].astype(str).isin(reviewed_employee_ids)
                 ]
-                available_summary_columns = [c for c in summary_columns if c in manager_responses.columns]
-                summary_df = manager_responses[available_summary_columns].copy()
-                summary_df = summary_df.rename(columns={
-                    'employee_name': 'Employee',
-                    'employee_email': 'Email',
-                    'status': 'Status',
-                    'questions_score': 'Score',
-                    'number_of_nos': 'No Answers',
-                    'created_at': 'Created',
-                    'updated_at': 'Updated'
-                })
-                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            else:
+                available_employees = manager_employees[
+                    ~manager_employees['ID'].astype(str).isin(reviewed_employee_ids)
+                ]
 
-                st.markdown("#### Scorecard Details")
-                for _, row in manager_responses.iterrows():
-                    title = f"{row.get('employee_name', 'Unknown Employee')} • {row.get('status', '')}"
-                    with st.expander(title):
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.write(f"Score: {row.get('questions_score', '')}")
-                            st.write(f"No answers: {row.get('number_of_nos', '')}")
-                            st.write(f"Created: {row.get('created_at', '')}")
-                        with c2:
-                            st.write(f"Updated: {row.get('updated_at', '')}")
-                            st.write(f"Employee: {row.get('employee_email', '')}")
-                            st.write(f"Manager: {row.get('manager_email', '')}")
-    except Exception as e:
-        st.error(f"Error loading scorecard status: {e}")
-        import traceback
-        st.code(traceback.format_exc())
+            if available_employees.empty:
+                if debug_mode:
+                    st.success("All employees in the system have been reviewed.")
+                else:
+                    st.success("All employees under your supervision have been reviewed.")
+                can_submit = False
+
+        if can_submit:
+            selected_employee_id = st.selectbox(
+                "Select employee to rate",
+                available_employees['ID'].astype(str).tolist(),
+                format_func=lambda eid: f"{available_employees[available_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
+            )
+            selected_employee = available_employees[available_employees['ID'].astype(str) == selected_employee_id].iloc[0]
+            st.write(f"Employee: {selected_employee['name']} | Branch: {selected_employee.get('branch', '')} | Dept: {selected_employee.get('dept', '')}")
+            st.write(f"Title: {selected_employee.get('job_title', '')} | Executive: {selected_employee.get('executive_email', '')}")
+            st.divider()
+
+            questions_df = st.session_state.questions_df
+            if questions_df.empty:
+                st.warning("The Questions sheet is empty. Please add questions to the Google Sheet.")
+            else:
+                questions_df = questions_df.fillna("")
+                answers = {}
+                questions_df['question_section'] = questions_df['question_section'].astype(str).fillna('').str.strip()
+                grouped_sections = questions_df.groupby('question_section', dropna=False, sort=False)
+
+                for section_name, section_rows in grouped_sections:
+                    if section_name:
+                        st.markdown(f"#### {section_name}")
+
+                    for _, question in section_rows.iterrows():
+                        header_text = str(question.get('header', '')).strip()
+                        if header_text:
+                            st.caption(header_text)
+
+                        key = f"q_{selected_employee_id}_{question['ID']}"
+                        if str(question['type']).strip().lower() == 'score':
+                            answers[str(question['ID'])] = st.radio(
+                                question['question'],
+                                options=['1', '2', '3'],
+                                key=key,
+                                index=0
+                            )
+                        else:
+                            answers[str(question['ID'])] = st.radio(
+                                question['question'],
+                                options=['Yes', 'No'],
+                                key=key,
+                                index=0
+                            )
+                        st.divider()
+
+                answered_score_questions = [qid for qid, val in answers.items() if val in ['1', '2', '3']]
+                current_score = 0
+                if answered_score_questions:
+                    score_values = [int(answers[qid]) for qid in answered_score_questions]
+                    current_score = int(round(sum(score_values) / len(score_values) * 100)) if score_values else 0
+
+                no_answers = sum(1 for qid, val in answers.items() if val == 'No')
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Current Score", f"{current_score}")
+                with col2:
+                    answered = len([v for v in answers.values() if v not in [None, '']])
+                    total_questions = len(questions_df)
+                    st.metric("Questions Answered", f"{answered}/{total_questions}")
+                with col3:
+                    st.metric("No Answers", no_answers)
+
+                st.divider()
+
+                st.markdown("### Additional Comments (Optional)")
+                manager_comment = st.text_area(
+                    "Add any additional comments or notes about this employee:",
+                    height=100,
+                    placeholder="Enter your comments here...",
+                    help="These comments will be included in the email sent to the employee but won't affect the score."
+                )
+
+                st.divider()
+
+                if st.button("Submit Scorecard", type='primary'):
+                    missing = [qid for qid, value in answers.items() if value in [None, '']]
+                    if missing:
+                        st.error("Please answer every question before submitting.")
+                    else:
+                        manager_row = manager_employees.iloc[0]
+                        response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
+                        append_response(response_entry)
+
+                        stage_email = 'employee'
+                        sent, recipient, preview = send_stage_email(response_entry, stage_email)
+
+                        st.success("Scorecard submitted successfully.")
+                        if recipient:
+                            st.info(f"Verification email sent to employee: {recipient}")
+
+                        reviewed_employee_ids = set()
+                        if not responses_df.empty:
+                            manager_submissions = responses_df[
+                                responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+                            ]
+                            reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
+
+                        remaining_employees = []
+                        for _, emp in manager_employees.iterrows():
+                            if str(emp['ID']) not in reviewed_employee_ids:
+                                remaining_employees.append(f"{emp['name']} ({emp['ID']})")
+
+                        if remaining_employees:
+                            st.warning(f"{len(remaining_employees)} employees still need review:")
+                            for emp in remaining_employees[:3]:
+                                st.write(f"• {emp}")
+                            if len(remaining_employees) > 3:
+                                st.write(f"• ... and {len(remaining_employees) - 3} more")
+                        else:
+                            st.success("All employees under your supervision have been reviewed.")
+
+                        if not sent:
+                            st.warning("Email not configured. Copy approval links below and send manually:")
+                            approve_link, reject_link = get_stage_links(response_entry)
+                            st.code(f"Approve: {approve_link}")
+                            st.code(f"Reject: {reject_link}")
+
+                        time.sleep(3)
+                        st.rerun()
+
+    with tab_status:
+        st.markdown("### Your scorecard status dashboard")
+        st.caption("Track approvals and progress for scorecards you've submitted.")
+
+        try:
+            current_responses_df = load_responses()
+            manager_email = st.session_state.get('manager_email', '').strip().lower()
+
+            if current_responses_df.empty:
+                st.info("No scorecards submitted yet.")
+            else:
+                if debug_mode:
+                    manager_responses = current_responses_df.copy()
+                else:
+                    manager_responses = current_responses_df[
+                        current_responses_df['manager_email'].astype(str).str.strip().str.lower() == manager_email
+                    ].copy()
+
+                if manager_responses.empty:
+                    st.info("No scorecards found for your manager email.")
+                else:
+                    manager_responses = manager_responses.sort_values(['created_at'], ascending=False)
+
+                    total_count = len(manager_responses)
+                    approved_count = int((manager_responses['status'].astype(str) == 'Approved').sum())
+                    pending_count = int(manager_responses['status'].astype(str).str.startswith('Pending').sum())
+                    rejected_count = int(manager_responses['status'].astype(str).str.contains('Rejected').sum())
+
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric("Total Submitted", total_count)
+                    k2.metric("Approved", approved_count)
+                    k3.metric("Pending", pending_count)
+                    k4.metric("Rejected", rejected_count)
+
+                    st.markdown("#### Submission Summary")
+                    summary_columns = [
+                        'employee_name', 'employee_email', 'status',
+                        'questions_score', 'number_of_nos', 'created_at', 'updated_at'
+                    ]
+                    available_summary_columns = [c for c in summary_columns if c in manager_responses.columns]
+                    summary_df = manager_responses[available_summary_columns].copy()
+                    summary_df = summary_df.rename(columns={
+                        'employee_name': 'Employee',
+                        'employee_email': 'Email',
+                        'status': 'Status',
+                        'questions_score': 'Score',
+                        'number_of_nos': 'No Answers',
+                        'created_at': 'Created',
+                        'updated_at': 'Updated'
+                    })
+                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+                    st.markdown("#### Scorecard Details")
+                    for _, row in manager_responses.iterrows():
+                        title = f"{row.get('employee_name', 'Unknown Employee')} • {row.get('status', '')}"
+                        with st.expander(title):
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.write(f"Score: {row.get('questions_score', '')}")
+                                st.write(f"No answers: {row.get('number_of_nos', '')}")
+                                st.write(f"Created: {row.get('created_at', '')}")
+                            with c2:
+                                st.write(f"Updated: {row.get('updated_at', '')}")
+                                st.write(f"Employee: {row.get('employee_email', '')}")
+                                st.write(f"Manager: {row.get('manager_email', '')}")
+        except Exception as e:
+            st.error(f"Error loading scorecard status: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+else:
+    employee_row = st.session_state.employees_df[
+        st.session_state.employees_df['email'].astype(str).str.lower() == st.session_state.employee_email
+    ]
+
+    st.subheader("Employee Dashboard")
+
+    if employee_row.empty:
+        st.error("Employee email not found in the Employees sheet.")
+        st.stop()
+
+    employee_record = employee_row.iloc[0]
+    st.write(f"Employee: {employee_record['name']} | Branch: {employee_record.get('branch', '')} | Dept: {employee_record.get('dept', '')}")
+    st.write(f"Title: {employee_record.get('job_title', '')}")
+    st.divider()
+
+    employee_questions_df = load_employee_questions()
+    employee_responses_df = load_employee_responses()
+    existing_response, _, _ = find_employee_response_by_email(st.session_state.employee_email)
+
+    if employee_questions_df.empty:
+        st.warning("The Employee_Questions sheet is empty. Please add questions to the Google Sheet.")
+        st.stop()
+
+    if existing_response:
+        st.markdown("### Your submitted response")
+        st.caption("You have already submitted your employee response. Delete it if you need to start over.")
+        display_employee_response(
+            employee_questions_df,
+            parse_response_blob(existing_response.get('responses', {})),
+            key_prefix=f"employee_existing_{existing_response['response_id']}"
+        )
+
+        if st.button("Delete Existing Response and Start Over", type='primary'):
+            if delete_employee_response(existing_response['response_id']):
+                st.success("Your existing response was deleted. You can now submit a new one.")
+                st.rerun()
+            else:
+                st.error("Unable to delete your response. Please try again.")
+    else:
+        st.markdown("### Submit your employee response")
+        st.caption("Each employee can submit one response for themselves. Your answers do not affect scorecard scoring.")
+        employee_answers = render_employee_question_inputs(
+            employee_questions_df,
+            key_prefix=f"employee_form_{employee_record['ID']}"
+        )
+
+        if st.button("Submit Employee Response", type='primary'):
+            missing_answers = [
+                question_id for question_id, answer in employee_answers.items()
+                if not employee_answer_complete(answer)
+            ]
+
+            if missing_answers:
+                st.error("Please answer every employee question before submitting.")
+            else:
+                response_entry = create_employee_response_entry(employee_record, employee_answers)
+                append_employee_response(response_entry)
+                st.success("Your employee response has been submitted.")
+                st.rerun()

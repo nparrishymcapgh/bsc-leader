@@ -1,6 +1,6 @@
 # Leader Level Balanced Score Card
 
-This Streamlit app loads data from Google Sheets, lets managers rate employees, and sends approval emails to employees, managers, and executives.
+This Streamlit app loads data from Google Sheets, lets managers rate employees, and sends approval emails to employees, managers, and executives. It also includes a separate employee login so each employee can complete a one-time self-response form from the Employee_Questions sheet.
 
 ## Setup Instructions
 
@@ -105,7 +105,13 @@ GOOGLE_SHEET_ID = "your-sheet-id-here"
 
 ### 5. Set up Google Sheets structure
 
-Your Google Sheet must contain exactly three tabs with specific column structures:
+Your Google Sheet should contain these input tabs:
+
+- `Employees`
+- `Questions`
+- `Employee_Questions`
+
+The app will create `Responses` and `Employee_Responses` automatically if they do not already exist.
 
 #### **Employees Tab**
 This tab contains all employees and their managers. Required columns (case-sensitive):
@@ -148,6 +154,28 @@ ID | question | type | question_section | header
 3  | How effectively does this employee collaborate with others? | score | Teamwork | Teamwork & Collaboration
 ```
 
+#### **Employee_Questions Tab**
+This tab contains the questions employees answer after logging in with their own email address. Required columns (case-sensitive):
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `ID` | Number/Text | Yes | Unique question identifier |
+| `question` | Text | Yes | The prompt shown to the employee |
+| `type` | Text | Yes | Either `Multi-Line` or `Three Line` |
+| `question_section` | Text | No | Groups questions into sections |
+
+Notes:
+- `Multi-Line` renders a multi-line text area.
+- `Three Line` renders three single-line inputs for the same question.
+- Employee questions do not affect any score or approval status.
+
+**Example:**
+```
+ID | question | type | question_section
+1  | What accomplishments are you most proud of this period? | Multi-Line | Accomplishments
+2  | List up to three goals for next period. | Three Line | Future Focus
+```
+
 #### **Responses Tab**
 This tab is created automatically by the app. Do not create it manually - it will be initialized with these columns:
 
@@ -178,6 +206,29 @@ This tab is created automatically by the app. Do not create it manually - it wil
 | `employee_token` | Text | Employee approval token |
 | `manager_token` | Text | Manager approval token |
 | `executive_token` | Text | Executive approval token |
+
+#### **Employee_Responses Tab**
+This tab stores employee self-responses. The app creates it automatically if it is missing. If you create it manually, use these columns in this order:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `response_id` | Text | Unique employee response identifier |
+| `created_at` | DateTime | When the employee response was created |
+| `updated_at` | DateTime | When the employee response was last updated |
+| `employee_id` | Text | Employee's ID from the Employees tab |
+| `employee_name` | Text | Employee's name |
+| `employee_email` | Text | Employee's email |
+| `branch` | Text | Employee's branch |
+| `dept` | Text | Employee's department |
+| `job_title` | Text | Employee's job title |
+| `responses` | Text | JSON string containing all employee answers |
+| `status` | Text | Submission status, currently `Submitted` |
+
+Employee response behavior:
+- Employees log in using the `email` column from the `Employees` tab.
+- Each employee can have only one active record in `Employee_Responses`.
+- If a response already exists, the employee sees it instead of a blank form.
+- Employees can delete their existing response and submit a new one for themselves.
 
 ### 6. Test your setup (optional but recommended)
 
@@ -275,6 +326,7 @@ After deployment:
 2. Check that the employee receives the email
 3. Click the approval/reject links in the email
 4. Verify the status updates in the app
+5. Log in as an employee using an email from the `Employees` tab and confirm the employee response flow works
 
 **Note**: If you're running locally and getting 404 errors, you need to deploy the app or use port forwarding (see deployment options above). Local URLs like `http://localhost:8501` won't work for email approval links.
 
@@ -313,4 +365,6 @@ This will check:
 ## Notes
 
 - The `Responses` sheet is created automatically if it does not exist.
+- The `Employee_Responses` sheet is created automatically if it does not exist.
 - The app stores approval timestamps in the responses sheet.
+- Employee self-responses are stored separately and do not change manager scorecard scoring or approvals.

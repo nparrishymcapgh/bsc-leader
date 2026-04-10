@@ -88,7 +88,8 @@ try:
     existing_sheets = [ws.title for ws in worksheets]
     print(f"📋 Found worksheets: {existing_sheets}")
 
-    required_sheets = ["Employees", "Questions", "Responses"]
+    required_sheets = ["Employees", "Questions", "Employee_Questions"]
+    auto_created_sheets = ["Responses", "Employee_Responses"]
     for sheet in required_sheets:
         if sheet in existing_sheets:
             print(f"✅ Worksheet '{sheet}' exists")
@@ -108,6 +109,12 @@ try:
                 print(f"   ❌ Error reading '{sheet}': {sheet_error}")
         else:
             print(f"❌ Worksheet '{sheet}' not found")
+
+    for sheet in auto_created_sheets:
+        if sheet in existing_sheets:
+            print(f"✅ Worksheet '{sheet}' exists")
+        else:
+            print(f"ℹ️  Worksheet '{sheet}' not found yet (the app will create it automatically when needed)")
 
 except PermissionError:
     print("❌ Permission denied accessing Google Sheet")
