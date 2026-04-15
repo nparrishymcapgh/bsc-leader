@@ -86,6 +86,7 @@ QUESTIONS_TAB = "Questions"
 RESPONSES_TAB = "Responses"
 EMPLOYEE_QUESTIONS_TAB = "Employee_Questions"
 EMPLOYEE_RESPONSES_TAB = "Employee_Responses"
+MANAGERS_TAB = "Managers"
 
 MANAGER_RESPONSE_COLUMNS = [
     "response_id", "created_at", "updated_at", "manager_email", "manager_name",
@@ -536,6 +537,37 @@ def load_employee_questions():
     return df
 
 
+def validate_manager_credentials(managers_df, email, password):
+    if managers_df.empty:
+        return False, "", "Managers sheet is missing or empty. Please add manager email and password records."
+
+    normalized_columns = {str(col).strip().lower(): col for col in managers_df.columns}
+    email_column = normalized_columns.get("manager_email") or normalized_columns.get("email")
+    password_column = normalized_columns.get("password")
+
+    if not email_column or not password_column:
+        return False, "", "Managers sheet must include email (or manager_email) and password columns."
+
+    normalized_email = str(email).strip().lower()
+    normalized_password = str(password)
+
+    manager_matches = managers_df[
+        managers_df[email_column].astype(str).str.strip().str.lower() == normalized_email
+    ]
+
+    if manager_matches.empty:
+        return False, "", "Manager email not found in the Managers sheet."
+
+    manager_row = manager_matches.iloc[0]
+    stored_password = str(manager_row.get(password_column, ""))
+
+    if normalized_password != stored_password:
+        return False, "", "Incorrect manager password."
+
+    manager_name = str(manager_row.get("manager_name", "")).strip() or normalized_email
+    return True, manager_name, ""
+
+
 def parse_response_blob(response_blob):
     try:
         return json.loads(response_blob) if isinstance(response_blob, str) else response_blob
@@ -983,9 +1015,11 @@ if debug_mode:
         with st.spinner("Loading data..."):
             employees_df = load_sheet(EMPLOYEES_TAB)
             questions_df = load_sheet(QUESTIONS_TAB)
+            managers_df = load_sheet(MANAGERS_TAB)
             responses_df = load_responses()
             st.session_state.employees_df = employees_df
             st.session_state.questions_df = questions_df
+            st.session_state.managers_df = managers_df
             st.session_state.responses_df = responses_df
             st.session_state.data_loaded = True
     responses_df = load_responses()
@@ -1008,9 +1042,11 @@ if not st.session_state.data_loaded:
     with st.spinner("Loading data..."):
         employees_df = load_sheet(EMPLOYEES_TAB)
         questions_df = load_sheet(QUESTIONS_TAB)
+        managers_df = load_sheet(MANAGERS_TAB)
         responses_df = load_responses()
         st.session_state.employees_df = employees_df
         st.session_state.questions_df = questions_df
+        st.session_state.managers_df = managers_df
         st.session_state.responses_df = responses_df
         st.session_state.data_loaded = True
 
@@ -1024,21 +1060,32 @@ if not st.session_state.logged_in:
             placeholder="manager@example.com",
             key='manager_login_email'
         ).strip().lower()
+        manager_login_password = st.text_input(
+            "Enter your manager password:",
+            type="password",
+            key='manager_login_password'
+        )
         if st.button("Login as Manager", type='primary'):
-            manager_emails = st.session_state.employees_df['manager_email'].astype(str).str.lower().values
-            if manager_login_email and manager_login_email in manager_emails:
-                manager_row = st.session_state.employees_df[
-                    st.session_state.employees_df['manager_email'].astype(str).str.lower() == manager_login_email
-                ].iloc[0]
-                st.session_state.logged_in = True
-                st.session_state.user_role = 'manager'
-                st.session_state.manager_email = manager_login_email
-                st.session_state.manager_name = manager_row.get('manager_name', manager_login_email)
-                st.session_state.employee_email = ''
-                st.session_state.employee_name = ''
-                st.rerun()
+            if not manager_login_email:
+                st.error("Please enter your manager email.")
+            elif not manager_login_password:
+                st.error("Please enter your manager password.")
             else:
-                st.error("Manager email not found. Please enter an email listed in the Employees sheet.")
+                is_valid_manager, manager_name, manager_error = validate_manager_credentials(
+                    st.session_state.managers_df,
+                    manager_login_email,
+                    manager_login_password
+                )
+                if is_valid_manager:
+                    st.session_state.logged_in = True
+                    st.session_state.user_role = 'manager'
+                    st.session_state.manager_email = manager_login_email
+                    st.session_state.manager_name = manager_name
+                    st.session_state.employee_email = ''
+                    st.session_state.employee_name = ''
+                    st.rerun()
+                else:
+                    st.error(manager_error)
 
     with employee_col:
         st.subheader("Employee Login")
