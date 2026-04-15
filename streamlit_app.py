@@ -1038,6 +1038,9 @@ if 'employee_email' not in st.session_state:
 if 'employee_name' not in st.session_state:
     st.session_state.employee_name = ''
 
+if 'managers_df' not in st.session_state:
+    st.session_state.managers_df = load_sheet(MANAGERS_TAB)
+
 if not st.session_state.data_loaded:
     with st.spinner("Loading data..."):
         employees_df = load_sheet(EMPLOYEES_TAB)
@@ -1072,7 +1075,7 @@ if not st.session_state.logged_in:
                 st.error("Please enter your manager password.")
             else:
                 is_valid_manager, manager_name, manager_error = validate_manager_credentials(
-                    st.session_state.managers_df,
+                    st.session_state.get('managers_df', pd.DataFrame()),
                     manager_login_email,
                     manager_login_password
                 )
