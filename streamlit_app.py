@@ -87,6 +87,7 @@ RESPONSES_TAB = "Responses"
 EMPLOYEE_QUESTIONS_TAB = "Employee_Questions"
 EMPLOYEE_RESPONSES_TAB = "Employee_Responses"
 MANAGERS_TAB = "Managers"
+PASSWORD_ADMIN_EMAIL = "nparrish@ymcapgh.org"
 
 MANAGER_RESPONSE_COLUMNS = [
     "response_id", "created_at", "updated_at", "manager_email", "manager_name",
@@ -277,6 +278,64 @@ def send_email(subject, html_body, recipient):
     except Exception as exc:
         st.error(f"Email send failed: {exc}")
         return False
+
+
+def get_manager_sheet_columns(managers_df):
+    normalized_columns = {str(col).strip().lower(): col for col in managers_df.columns}
+    email_column = normalized_columns.get("manager_email") or normalized_columns.get("email")
+    password_column = normalized_columns.get("password")
+    manager_name_column = normalized_columns.get("manager_name")
+    return email_column, password_column, manager_name_column
+
+
+def send_manager_password_email(manager_email, manager_password, manager_name=""):
+    app_url = get_app_url()
+    subject = "Leader Level Balanced Score Card - Manager Login Password"
+    greeting_name = str(manager_name).strip() or manager_email
+    body = [f"<h2>Manager Login Details</h2>"]
+    body.append(f"<p>Hello {greeting_name},</p>")
+    body.append("<p>Here are your current manager login details for the Leader Level Balanced Score Card app:</p>")
+    body.append(f"<p><strong>Email:</strong> {manager_email}<br><strong>Password:</strong> {manager_password}</p>")
+    if app_url:
+        body.append(f"<p><a href=\"{app_url}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Open the app</a></p>")
+    body.append("<p>If you were not expecting this email, contact the app administrator.</p>")
+    return send_email(subject, "".join(body), manager_email)
+
+
+def email_all_manager_passwords(managers_df):
+    if managers_df.empty:
+        return 0, [], "Managers sheet is missing or empty."
+
+    email_column, password_column, manager_name_column = get_manager_sheet_columns(managers_df)
+    if not email_column or not password_column:
+        return 0, [], "Managers sheet must include email (or manager_email) and password columns."
+
+    unique_managers = managers_df.copy()
+    unique_managers[email_column] = unique_managers[email_column].astype(str).str.strip().str.lower()
+    unique_managers = unique_managers[unique_managers[email_column] != ""]
+    unique_managers = unique_managers.drop_duplicates(subset=[email_column], keep="first")
+
+    if unique_managers.empty:
+        return 0, [], "Managers sheet does not contain any valid manager email addresses."
+
+    sent_count = 0
+    failed_emails = []
+
+    for _, manager_row in unique_managers.iterrows():
+        manager_email = str(manager_row.get(email_column, "")).strip().lower()
+        manager_password = str(manager_row.get(password_column, ""))
+        manager_name = str(manager_row.get(manager_name_column, "")).strip() if manager_name_column else ""
+
+        if not manager_password:
+            failed_emails.append(f"{manager_email} (missing password)")
+            continue
+
+        if send_manager_password_email(manager_email, manager_password, manager_name):
+            sent_count += 1
+        else:
+            failed_emails.append(manager_email)
+
+    return sent_count, failed_emails, ""
 
 
 def format_scorecard_summary(employee, question_rows, answers):
@@ -541,9 +600,7 @@ def validate_manager_credentials(managers_df, email, password):
     if managers_df.empty:
         return False, "", "Managers sheet is missing or empty. Please add manager email and password records."
 
-    normalized_columns = {str(col).strip().lower(): col for col in managers_df.columns}
-    email_column = normalized_columns.get("manager_email") or normalized_columns.get("email")
-    password_column = normalized_columns.get("password")
+    email_column, password_column, manager_name_column = get_manager_sheet_columns(managers_df)
 
     if not email_column or not password_column:
         return False, "", "Managers sheet must include email (or manager_email) and password columns."
@@ -564,7 +621,8 @@ def validate_manager_credentials(managers_df, email, password):
     if normalized_password != stored_password:
         return False, "", "Incorrect manager password."
 
-    manager_name = str(manager_row.get("manager_name", "")).strip() or normalized_email
+    manager_name = str(manager_row.get(manager_name_column, "")).strip() if manager_name_column else ""
+    manager_name = manager_name or normalized_email
     return True, manager_name, ""
 
 
@@ -1148,6 +1206,21 @@ if st.session_state.user_role == 'manager':
     employee_self_responses_df = load_employee_responses()
 
     st.subheader("Manager Dashboard")
+
+    if st.session_state.manager_email == PASSWORD_ADMIN_EMAIL:
+        st.markdown("### Manager Password Administration")
+        st.caption("This action emails the current password in the Managers sheet to each manager.")
+        if st.button("Email All Manager Passwords"):
+            sent_count, failed_emails, admin_error = email_all_manager_passwords(
+                st.session_state.get('managers_df', pd.DataFrame())
+            )
+            if admin_error:
+                st.error(admin_error)
+            elif failed_emails:
+                st.warning(f"Sent {sent_count} manager password emails. Failed: {', '.join(failed_emails)}")
+            else:
+                st.success(f"Sent manager password emails to {sent_count} managers.")
+        st.divider()
 
     tab_new, tab_status, tab_self_eval = st.tabs(["Submit Scorecard", "Scorecard Status", "Employee Self-Evaluations"])
 
