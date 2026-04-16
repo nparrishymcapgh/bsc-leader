@@ -1,5 +1,46 @@
 # Patch Notes
 
+## Release 1.3
+Date: 2026-04-16
+Type: Feature Release
+
+### Version Control
+- Previous version: 1.28.2
+- Current version: 1.3
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+This release introduces manager draft support, executive login and branch dashboards, approved-scorecard PDF export, and confirmation prompts before all mass-email actions.
+
+### What Changed
+1. Added manager draft capability in scorecard submission flow.
+2. Added Save as Draft button that stores the current scorecard state per employee without entering approval workflow.
+3. Added draft restoration so managers can return to an employee and continue from saved answers/comments.
+4. Added executive login section using the Executives sheet (`executive_email` + `password`).
+5. Added executive dashboard view of submitted scorecards and statuses scoped to executive branch assignments.
+6. Added executive mass-email workflow to notify managers missing employee scorecards, including employee lists.
+7. Added executive admin actions for `nparrish@ymcapgh.org`:
+   - Email all executive passwords.
+   - Email all managers everywhere who are missing reviews.
+8. Added approved-only PDF export for managers and executives by employee response.
+9. PDF output now includes:
+   - Balanced scorecard responses,
+   - Employee self-evaluation,
+   - Approval decisions and timestamps.
+10. Added mandatory Yes/No confirmation before all mass-email operations.
+
+### Files Updated
+- streamlit_app.py
+- requirements.txt
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/usr/local/bin/python -m py_compile streamlit_app.py`
+2. Environment, sheets, SMTP, and app-url integration check:
+   - `/usr/local/bin/python test_setup.py`
+
 ## Release 1.28.2
 Date: 2026-04-16
 Type: Patch

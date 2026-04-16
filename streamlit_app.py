@@ -6,9 +6,15 @@ from datetime import datetime
 import json
 import uuid
 import smtplib
+import io
 from email.message import EmailMessage
 from urllib.parse import urlencode
 import time
+from xml.sax.saxutils import escape
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 # ============================================================================
 # PAGE CONFIG
@@ -86,7 +92,9 @@ RESPONSES_TAB = "Responses"
 EMPLOYEE_QUESTIONS_TAB = "Employee_Questions"
 EMPLOYEE_RESPONSES_TAB = "Employee_Responses"
 MANAGERS_TAB = "Managers"
+EXECUTIVES_TAB = "Executives"
 PASSWORD_ADMIN_EMAIL = "nparrish@ymcapgh.org"
+EXECUTIVE_ADMIN_EMAIL = "nparrish@ymcapgh.org"
 DEFAULT_DATA_SYNC_MINUTES = 5
 
 MANAGER_RESPONSE_COLUMNS = [
@@ -208,6 +216,7 @@ def sync_session_data():
     st.session_state.employees_df = load_sheet(EMPLOYEES_TAB)
     st.session_state.questions_df = load_sheet(QUESTIONS_TAB)
     st.session_state.managers_df = load_sheet(MANAGERS_TAB)
+    st.session_state.executives_df = load_sheet(EXECUTIVES_TAB)
     st.session_state.responses_df = load_responses()
     st.session_state.data_loaded = True
     st.session_state.last_data_sync_ts = time.time()
@@ -313,6 +322,13 @@ def get_manager_sheet_columns(managers_df):
     return email_column, password_column, manager_name_column
 
 
+def get_executive_sheet_columns(executives_df):
+    normalized_columns = {str(col).strip().lower(): col for col in executives_df.columns}
+    email_column = normalized_columns.get("executive_email") or normalized_columns.get("email")
+    password_column = normalized_columns.get("password")
+    return email_column, password_column
+
+
 def send_manager_password_email(manager_email, manager_password, manager_name=""):
     app_url = get_app_url()
     subject = "Leader Level Balanced Score Card - Manager Login Password"
@@ -363,6 +379,79 @@ def email_all_manager_passwords(managers_df):
     return sent_count, failed_emails, ""
 
 
+def send_executive_password_email(executive_email, executive_password):
+    app_url = get_app_url()
+    subject = "Leader Level Balanced Score Card - Executive Login Password"
+    body = ["<h2>Executive Login Details</h2>"]
+    body.append(f"<p>Hello {executive_email},</p>")
+    body.append("<p>Here are your current executive login details for the Leader Level Balanced Score Card app:</p>")
+    body.append(f"<p><strong>Email:</strong> {executive_email}<br><strong>Password:</strong> {executive_password}</p>")
+    if app_url:
+        body.append(f"<p><a href=\"{app_url}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Open the app</a></p>")
+    body.append("<p>If you were not expecting this email, contact the app administrator.</p>")
+    return send_email(subject, "".join(body), executive_email)
+
+
+def email_all_executive_passwords(executives_df):
+    if executives_df.empty:
+        return 0, [], "Executives sheet is missing or empty."
+
+    email_column, password_column = get_executive_sheet_columns(executives_df)
+    if not email_column or not password_column:
+        return 0, [], "Executives sheet must include executive_email (or email) and password columns."
+
+    unique_executives = executives_df.copy()
+    unique_executives[email_column] = unique_executives[email_column].astype(str).str.strip().str.lower()
+    unique_executives = unique_executives[unique_executives[email_column] != ""]
+    unique_executives = unique_executives.drop_duplicates(subset=[email_column], keep="first")
+
+    if unique_executives.empty:
+        return 0, [], "Executives sheet does not contain any valid executive email addresses."
+
+    sent_count = 0
+    failed_emails = []
+
+    for _, executive_row in unique_executives.iterrows():
+        executive_email = str(executive_row.get(email_column, "")).strip().lower()
+        executive_password = str(executive_row.get(password_column, ""))
+
+        if not executive_password:
+            failed_emails.append(f"{executive_email} (missing password)")
+            continue
+
+        if send_executive_password_email(executive_email, executive_password):
+            sent_count += 1
+        else:
+            failed_emails.append(executive_email)
+
+    return sent_count, failed_emails, ""
+
+
+def render_mass_email_confirmation(action_key, trigger_label, prompt_text):
+    state_key = f"mass_email_confirm_{action_key}"
+    if st.button(trigger_label, key=f"{action_key}_trigger"):
+        st.session_state[state_key] = True
+
+    if not st.session_state.get(state_key, False):
+        return False
+
+    st.warning(prompt_text)
+    yes_col, no_col = st.columns(2)
+    yes_clicked = yes_col.button("Yes", type='primary', key=f"{action_key}_yes")
+    no_clicked = no_col.button("No", key=f"{action_key}_no")
+
+    if no_clicked:
+        st.session_state[state_key] = False
+        st.info("Mass email canceled.")
+        return False
+
+    if yes_clicked:
+        st.session_state[state_key] = False
+        return True
+
+    return False
+
+
 def format_scorecard_summary(employee, question_rows, answers):
     lines = []
     lines.append(f"<p><strong>Employee:</strong> {employee['name']} ({employee['ID']})</p>")
@@ -399,6 +488,206 @@ def format_email_body(subject, employee, question_rows, answers, stage, approve_
         html.append(f"<p><strong>Manager Comments:</strong></p><blockquote style='border-left: 4px solid #006B6B; padding-left: 10px; margin: 10px 0; font-style: italic;'>{comment.strip()}</blockquote>")
 
     return "".join(html)
+
+
+def calculate_score_metrics(answers):
+    score_answers = [int(v) for _, v in answers.items() if v in ["1", "2", "3"]]
+    questions_score = int(round(sum(score_answers) / len(score_answers) * 100)) if score_answers else 0
+    number_of_nos = sum(1 for _, v in answers.items() if v == "No")
+    return questions_score, number_of_nos
+
+
+def get_latest_manager_draft_response(responses_df, manager_email, employee_id):
+    if responses_df.empty:
+        return None
+
+    matches = responses_df[
+        (responses_df['manager_email'].astype(str).str.strip().str.lower() == manager_email.strip().lower())
+        & (responses_df['employee_id'].astype(str) == str(employee_id))
+        & (responses_df['status'].astype(str).str.strip().str.lower() == "draft")
+    ].copy()
+
+    if matches.empty:
+        return None
+
+    matches['sort_timestamp'] = matches['updated_at'].astype(str)
+    return matches.sort_values('sort_timestamp', ascending=False).iloc[0].to_dict()
+
+
+def get_missing_scorecards_by_manager(employees_df, responses_df, branch_names=None):
+    if employees_df.empty:
+        return {}
+
+    scoped_employees = employees_df.copy()
+    if branch_names:
+        normalized_branch_names = {str(branch).strip().lower() for branch in branch_names if str(branch).strip()}
+        scoped_employees = scoped_employees[
+            scoped_employees['branch'].astype(str).str.strip().str.lower().isin(normalized_branch_names)
+        ]
+
+    if scoped_employees.empty:
+        return {}
+
+    submitted_lookup = set()
+    if not responses_df.empty:
+        submitted_responses = responses_df[
+            responses_df['status'].astype(str).str.strip().str.lower() != "draft"
+        ].copy()
+
+        for _, row in submitted_responses.iterrows():
+            manager_key = str(row.get('manager_email', '')).strip().lower()
+            employee_key = str(row.get('employee_id', '')).strip()
+            if manager_key and employee_key:
+                submitted_lookup.add((manager_key, employee_key))
+
+    missing_by_manager = {}
+
+    for _, employee_row in scoped_employees.iterrows():
+        manager_email = str(employee_row.get('manager_email', '')).strip().lower()
+        employee_id = str(employee_row.get('ID', '')).strip()
+
+        if not manager_email or not employee_id:
+            continue
+
+        if (manager_email, employee_id) in submitted_lookup:
+            continue
+
+        missing_by_manager.setdefault(manager_email, []).append(
+            {
+                "employee_name": str(employee_row.get('name', '')).strip() or employee_id,
+                "employee_id": employee_id,
+                "branch": str(employee_row.get('branch', '')).strip(),
+                "manager_name": str(employee_row.get('manager_name', '')).strip()
+            }
+        )
+
+    return missing_by_manager
+
+
+def send_missing_scorecard_email_to_manager(manager_email, manager_name, missing_employees):
+    if not manager_email or '@' not in manager_email:
+        return False
+
+    app_url = get_app_url()
+    greeting_name = manager_name or manager_email
+    subject = "Action Required: Missing balanced scorecards"
+    body = ["<h2>Balanced scorecards missing</h2>"]
+    body.append(f"<p>Hello {greeting_name},</p>")
+    body.append("<p>The following employees do not yet have a submitted balanced scorecard:</p>")
+    body.append("<ul>")
+    for item in missing_employees:
+        branch_text = f" - {item.get('branch', '')}" if item.get('branch', '') else ""
+        body.append(f"<li>{item.get('employee_name', '')} ({item.get('employee_id', '')}){branch_text}</li>")
+    body.append("</ul>")
+
+    if app_url:
+        body.append(f"<p><a href=\"{app_url}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Open the app</a></p>")
+
+    body.append("<p>Please submit these reviews as soon as possible.</p>")
+    return send_email(subject, "".join(body), manager_email)
+
+
+def email_managers_with_missing_scorecards(missing_by_manager):
+    sent_count = 0
+    failed_emails = []
+
+    for manager_email, items in missing_by_manager.items():
+        manager_name = str(items[0].get('manager_name', '')).strip() if items else ""
+        if send_missing_scorecard_email_to_manager(manager_email, manager_name, items):
+            sent_count += 1
+        else:
+            failed_emails.append(manager_email)
+
+    return sent_count, failed_emails
+
+
+def generate_scorecard_pdf(response, manager_questions_df, employee_questions_df, employee_self_eval):
+    story = []
+    styles = getSampleStyleSheet()
+    story.append(Paragraph("Leader Level Balanced Score Card", styles['Title']))
+    story.append(Spacer(1, 12))
+
+    employee_name = escape(str(response.get('employee_name', '')))
+    employee_id = escape(str(response.get('employee_id', '')))
+    manager_name = escape(str(response.get('manager_name', '')))
+    manager_email = escape(str(response.get('manager_email', '')))
+    status = escape(str(response.get('status', '')))
+    story.append(Paragraph(f"Employee: {employee_name} ({employee_id})", styles['Normal']))
+    story.append(Paragraph(f"Manager: {manager_name} ({manager_email})", styles['Normal']))
+    story.append(Paragraph(f"Branch: {escape(str(response.get('branch', '')))} | Dept: {escape(str(response.get('dept', '')))}", styles['Normal']))
+    story.append(Paragraph(f"Status: {status}", styles['Normal']))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Balanced Scorecard Responses", styles['Heading2']))
+    manager_answers = parse_response_blob(response.get('responses', {}))
+    manager_rows = [["Section", "Question", "Answer"]]
+    for _, question in manager_questions_df.fillna("").iterrows():
+        manager_rows.append(
+            [
+                str(question.get('question_section', '')),
+                str(question.get('question', '')),
+                str(manager_answers.get(str(question.get('ID', '')), ''))
+            ]
+        )
+    manager_table = Table(manager_rows, repeatRows=1)
+    manager_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP')
+    ]))
+    story.append(manager_table)
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Employee Self-Evaluation", styles['Heading2']))
+    if employee_self_eval:
+        self_answers = parse_response_blob(employee_self_eval.get('responses', {}))
+        self_rows = [["Section", "Question", "Response"]]
+        prepared_questions = prepare_employee_questions(employee_questions_df.fillna(""))
+        for _, question in prepared_questions.iterrows():
+            question_id = str(question.get('ID', ''))
+            response_key = str(question.get('_response_key', ''))
+            question_type = question.get('type', '')
+            stored_value = self_answers.get(response_key)
+            if stored_value is None:
+                stored_value = self_answers.get(question_id, "")
+            self_rows.append(
+                [
+                    str(question.get('question_section', '')),
+                    str(question.get('question', '')),
+                    format_compact_employee_answer(question_type, stored_value)
+                ]
+            )
+
+        self_table = Table(self_rows, repeatRows=1)
+        self_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP')
+        ]))
+        story.append(self_table)
+    else:
+        story.append(Paragraph("No employee self-evaluation response found.", styles['Normal']))
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("Approvals", styles['Heading2']))
+    approvals_rows = [
+        ["Role", "Decision", "Timestamp"],
+        ["Employee", str(response.get('employee_agree', '')), str(response.get('employee_agree_ts', ''))],
+        ["Manager", str(response.get('manager_agree', '')), str(response.get('manager_agree_ts', ''))],
+        ["Executive", str(response.get('executive_agree', '')), str(response.get('executive_agree_ts', ''))]
+    ]
+    approvals_table = Table(approvals_rows, repeatRows=1)
+    approvals_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP')
+    ]))
+    story.append(approvals_table)
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    doc.build(story)
+    return buffer.getvalue()
 
 # ============================================================================
 # RESPONSE OPERATIONS
@@ -651,6 +940,34 @@ def validate_manager_credentials(managers_df, email, password):
     return True, manager_name, ""
 
 
+def validate_executive_credentials(executives_df, email, password):
+    if executives_df.empty:
+        return False, "", "Executives sheet is missing or empty. Please add executive email and password records."
+
+    email_column, password_column = get_executive_sheet_columns(executives_df)
+
+    if not email_column or not password_column:
+        return False, "", "Executives sheet must include executive_email (or email) and password columns."
+
+    normalized_email = str(email).strip().lower()
+    normalized_password = str(password)
+
+    executive_matches = executives_df[
+        executives_df[email_column].astype(str).str.strip().str.lower() == normalized_email
+    ]
+
+    if executive_matches.empty:
+        return False, "", "Executive email not found in the Executives sheet."
+
+    executive_row = executive_matches.iloc[0]
+    stored_password = str(executive_row.get(password_column, ""))
+
+    if normalized_password != stored_password:
+        return False, "", "Incorrect executive password."
+
+    return True, normalized_email, ""
+
+
 def parse_response_blob(response_blob):
     try:
         return json.loads(response_blob) if isinstance(response_blob, str) else response_blob
@@ -828,6 +1145,7 @@ def reset_login_state():
     st.session_state.user_role = ''
     st.session_state.manager_email = ''
     st.session_state.manager_name = ''
+    st.session_state.executive_email = ''
     st.session_state.employee_email = ''
     st.session_state.employee_name = ''
 
@@ -1126,8 +1444,14 @@ if 'employee_email' not in st.session_state:
 if 'employee_name' not in st.session_state:
     st.session_state.employee_name = ''
 
+if 'executive_email' not in st.session_state:
+    st.session_state.executive_email = ''
+
 if 'managers_df' not in st.session_state:
     st.session_state.managers_df = load_sheet(MANAGERS_TAB)
+
+if 'executives_df' not in st.session_state:
+    st.session_state.executives_df = load_sheet(EXECUTIVES_TAB)
 
 if 'last_data_sync_ts' not in st.session_state:
     st.session_state.last_data_sync_ts = 0.0
@@ -1205,10 +1529,199 @@ if not st.session_state.logged_in:
             else:
                 st.error("Employee email not found. Please enter an email listed in the Employees sheet.")
 
+    st.divider()
+    st.subheader("Executive Login")
+    executive_login_email = st.text_input(
+        "Enter your executive email:",
+        placeholder="executive@example.com",
+        key='executive_login_email'
+    ).strip().lower()
+    executive_login_password = st.text_input(
+        "Enter your executive password:",
+        type="password",
+        key='executive_login_password'
+    )
+
+    if st.button("Login as Executive", type='primary'):
+        if not executive_login_email:
+            st.error("Please enter your executive email.")
+        elif not executive_login_password:
+            st.error("Please enter your executive password.")
+        else:
+            is_valid_executive, executive_email, executive_error = validate_executive_credentials(
+                st.session_state.get('executives_df', pd.DataFrame()),
+                executive_login_email,
+                executive_login_password
+            )
+            if is_valid_executive:
+                st.session_state.logged_in = True
+                st.session_state.user_role = 'executive'
+                st.session_state.executive_email = executive_email
+                st.session_state.manager_email = ''
+                st.session_state.manager_name = ''
+                st.session_state.employee_email = ''
+                st.session_state.employee_name = ''
+                st.rerun()
+            else:
+                st.error(executive_error)
+
     st.stop()
 
 if st.session_state.user_role == 'manager':
     sidebar_identity = f"{st.session_state.manager_name} ({st.session_state.manager_email})"
+elif st.session_state.user_role == 'executive':
+    sidebar_identity = st.session_state.executive_email
+elif st.session_state.user_role == 'executive':
+    st.subheader("Executive Dashboard")
+
+    responses_df = load_responses()
+    responses_df['employee_id'] = responses_df['employee_id'].astype(str)
+    employees_df = st.session_state.employees_df.copy()
+
+    executive_email = st.session_state.get('executive_email', '').strip().lower()
+
+    executive_branches = set(
+        employees_df[
+            employees_df['executive_email'].astype(str).str.strip().str.lower() == executive_email
+        ]['branch'].astype(str).str.strip()
+    )
+    executive_branches = {branch for branch in executive_branches if branch}
+
+    branch_responses = responses_df[
+        responses_df['branch'].astype(str).str.strip().isin(executive_branches)
+    ].copy() if executive_branches else pd.DataFrame(columns=responses_df.columns)
+
+    if branch_responses.empty:
+        branch_responses = responses_df[
+            responses_df['executive_email'].astype(str).str.strip().str.lower() == executive_email
+        ].copy()
+
+    total_count = len(branch_responses)
+    approved_count = int((branch_responses['status'].astype(str) == 'Approved').sum()) if total_count else 0
+    pending_count = int(branch_responses['status'].astype(str).str.startswith('Pending').sum()) if total_count else 0
+    rejected_count = int(branch_responses['status'].astype(str).str.contains('Rejected').sum()) if total_count else 0
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total Scorecards", total_count)
+    k2.metric("Approved", approved_count)
+    k3.metric("Pending", pending_count)
+    k4.metric("Rejected", rejected_count)
+
+    if executive_branches:
+        st.caption(f"Branch scope: {', '.join(sorted(executive_branches))}")
+    else:
+        st.caption("No branch assignment found. Showing scorecards tied directly to your executive email.")
+
+    st.markdown("### Branch Status View")
+    if branch_responses.empty:
+        st.info("No scorecards found for your executive scope.")
+    else:
+        branch_responses = branch_responses.sort_values(['created_at'], ascending=False)
+        st.dataframe(
+            branch_responses[[
+                'employee_name', 'employee_email', 'branch', 'manager_email',
+                'status', 'questions_score', 'created_at', 'updated_at'
+            ]],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        manager_questions_for_pdf = load_manager_questions()
+        employee_questions_for_pdf = load_employee_questions()
+        employee_responses_for_pdf = load_employee_responses()
+
+        st.markdown("### Scorecard Details")
+        for _, row in branch_responses.iterrows():
+            with st.expander(f"{row.get('employee_name', 'Unknown Employee')} ({row.get('employee_id', '')}) • {row.get('status', '')}"):
+                st.write(f"Manager: {row.get('manager_name', '')} ({row.get('manager_email', '')})")
+                st.write(f"Branch: {row.get('branch', '')} | Dept: {row.get('dept', '')}")
+                st.write(f"Score: {row.get('questions_score', '')} | No answers: {row.get('number_of_nos', '')}")
+                st.write(f"Employee approval: {row.get('employee_agree', '')} at {row.get('employee_agree_ts', '')}")
+                st.write(f"Manager approval: {row.get('manager_agree', '')} at {row.get('manager_agree_ts', '')}")
+                st.write(f"Executive approval: {row.get('executive_agree', '')} at {row.get('executive_agree_ts', '')}")
+
+                if str(row.get('status', '')).strip() == 'Approved':
+                    employee_self_eval = get_latest_employee_response_for_email(
+                        employee_responses_for_pdf,
+                        str(row.get('employee_email', '')).strip().lower()
+                    )
+                    pdf_bytes = generate_scorecard_pdf(
+                        row,
+                        manager_questions_for_pdf,
+                        employee_questions_for_pdf,
+                        employee_self_eval
+                    )
+                    file_name = f"scorecard_{str(row.get('employee_id', 'employee')).strip()}_{str(row.get('response_id', 'response')).strip()}.pdf"
+                    st.download_button(
+                        "Download Approved PDF",
+                        data=pdf_bytes,
+                        file_name=file_name,
+                        mime="application/pdf",
+                        key=f"executive_pdf_{row.get('response_id', '')}"
+                    )
+                else:
+                    st.caption("PDF download is available only after full approval.")
+
+    st.divider()
+    st.markdown("### Missing Scorecard Notifications")
+
+    missing_by_manager_branch = get_missing_scorecards_by_manager(
+        employees_df,
+        responses_df,
+        executive_branches if executive_branches else None
+    )
+
+    if missing_by_manager_branch:
+        missing_employee_total = sum(len(items) for items in missing_by_manager_branch.values())
+        st.caption(
+            f"{len(missing_by_manager_branch)} managers are missing {missing_employee_total} employee scorecards in your scope."
+        )
+        if render_mass_email_confirmation(
+            "executive_branch_missing_reviews",
+            "Email All Managers Missing Reviews In My Scope",
+            "Are you sure you want to email every manager in your scope who is missing scorecards?"
+        ):
+            sent_count, failed_emails = email_managers_with_missing_scorecards(missing_by_manager_branch)
+            if failed_emails:
+                st.warning(f"Sent {sent_count} manager notifications. Failed: {', '.join(failed_emails)}")
+            else:
+                st.success(f"Sent notifications to {sent_count} managers.")
+    else:
+        st.info("No missing scorecards found in your scope.")
+
+    if executive_email == EXECUTIVE_ADMIN_EMAIL:
+        st.divider()
+        st.markdown("### Executive Administration")
+
+        if render_mass_email_confirmation(
+            "executive_passwords_admin",
+            "Email Executive Passwords to All Executives",
+            "Are you sure you want to email passwords to all executives?"
+        ):
+            sent_count, failed_emails, admin_error = email_all_executive_passwords(
+                st.session_state.get('executives_df', pd.DataFrame())
+            )
+            if admin_error:
+                st.error(admin_error)
+            elif failed_emails:
+                st.warning(f"Sent {sent_count} executive password emails. Failed: {', '.join(failed_emails)}")
+            else:
+                st.success(f"Sent executive password emails to {sent_count} executives.")
+
+        missing_by_manager_global = get_missing_scorecards_by_manager(employees_df, responses_df)
+        if missing_by_manager_global:
+            if render_mass_email_confirmation(
+                "executive_global_missing_reviews",
+                "Email All Managers Everywhere Missing Reviews",
+                "Are you sure you want to email all managers everywhere who are missing reviews?"
+            ):
+                sent_count, failed_emails = email_managers_with_missing_scorecards(missing_by_manager_global)
+                if failed_emails:
+                    st.warning(f"Sent {sent_count} global manager reminders. Failed: {', '.join(failed_emails)}")
+                else:
+                    st.success(f"Sent global reminders to {sent_count} managers.")
+        else:
+            st.info("No global manager reminders are currently needed.")
 else:
     sidebar_identity = f"{st.session_state.employee_name} ({st.session_state.employee_email})"
 
@@ -1256,7 +1769,11 @@ if st.session_state.user_role == 'manager':
     if st.session_state.manager_email == PASSWORD_ADMIN_EMAIL:
         st.markdown("### Manager Password Administration")
         st.caption("This action emails the current password in the Managers sheet to each manager.")
-        if st.button("Email All Manager Passwords"):
+        if render_mass_email_confirmation(
+            "manager_passwords_admin",
+            "Email All Manager Passwords",
+            "Are you sure you want to email manager passwords to all managers?"
+        ):
             sent_count, failed_emails, admin_error = email_all_manager_passwords(
                 st.session_state.get('managers_df', pd.DataFrame())
             )
@@ -1286,10 +1803,16 @@ if st.session_state.user_role == 'manager':
             reviewed_employee_ids = set()
             if not responses_df.empty:
                 if debug_mode:
-                    reviewed_employee_ids = set(responses_df['employee_id'].astype(str).unique())
+                    submitted_responses = responses_df[
+                        responses_df['status'].astype(str).str.strip().str.lower() != 'draft'
+                    ]
+                    reviewed_employee_ids = set(submitted_responses['employee_id'].astype(str).unique())
                 else:
                     manager_submissions = responses_df[
                         responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+                    ]
+                    manager_submissions = manager_submissions[
+                        manager_submissions['status'].astype(str).str.strip().str.lower() != 'draft'
                     ]
                     reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
 
@@ -1328,7 +1851,11 @@ if st.session_state.user_role == 'manager':
                 st.caption(
                     f"{len(missing_self_eval_employees)} employees under you still need to submit a self-evaluation before their scorecard can be completed."
                 )
-                if st.button("Send Reminder Emails to All Incomplete Employees", key="send_bulk_self_eval_reminders"):
+                if render_mass_email_confirmation(
+                    "send_bulk_self_eval_reminders",
+                    "Send Reminder Emails to All Incomplete Employees",
+                    "Are you sure you want to email all incomplete employees?"
+                ):
                     sent_recipients = []
                     failed_recipients = []
                     app_url_hint = ""
@@ -1365,10 +1892,21 @@ if st.session_state.user_role == 'manager':
 
             selected_employee = available_employees[available_employees['ID'].astype(str) == selected_employee_id].iloc[0]
             selected_employee_email = str(selected_employee.get('email', '')).strip().lower()
+            selected_draft = get_latest_manager_draft_response(
+                responses_df,
+                st.session_state.manager_email,
+                selected_employee_id
+            )
+            selected_draft_answers = parse_response_blob(selected_draft.get('responses', {})) if selected_draft else {}
+            selected_draft_comment = str(selected_draft.get('comments', '')) if selected_draft else ''
+
             selected_employee_self_eval = get_latest_employee_response_for_email(
                 employee_self_responses_df,
                 selected_employee_email
             )
+
+            if selected_draft:
+                st.info("A saved draft exists for this employee. Update it or submit it when ready.")
 
             st.write(f"Employee: {selected_employee['name']} | Branch: {selected_employee.get('branch', '')} | Dept: {selected_employee.get('dept', '')}")
             st.write(f"Title: {selected_employee.get('job_title', '')} | Executive: {selected_employee.get('executive_email', '')}")
@@ -1417,6 +1955,19 @@ if st.session_state.user_role == 'manager':
                     questions_df['question_section'] = questions_df['question_section'].astype(str).fillna('').str.strip()
                     grouped_sections = questions_df.groupby('question_section', dropna=False, sort=False)
 
+                    selected_employee_state_key = "manager_selected_employee_for_form"
+                    if st.session_state.get(selected_employee_state_key) != str(selected_employee_id):
+                        for _, question in questions_df.iterrows():
+                            question_key = str(question['ID'])
+                            widget_key = f"q_{selected_employee_id}_{question['ID']}"
+                            question_type = str(question.get('type', '')).strip().lower()
+                            if question_type == 'score':
+                                st.session_state[widget_key] = str(selected_draft_answers.get(question_key, '1'))
+                            else:
+                                st.session_state[widget_key] = str(selected_draft_answers.get(question_key, 'Yes'))
+                        st.session_state[f"manager_comment_{selected_employee_id}"] = selected_draft_comment
+                        st.session_state[selected_employee_state_key] = str(selected_employee_id)
+
                     for section_name, section_rows in grouped_sections:
                         if section_name:
                             st.markdown(f"#### {section_name}")
@@ -1431,15 +1982,13 @@ if st.session_state.user_role == 'manager':
                                 answers[str(question['ID'])] = st.radio(
                                     question['question'],
                                     options=['1', '2', '3'],
-                                    key=key,
-                                    index=0
+                                    key=key
                                 )
                             else:
                                 answers[str(question['ID'])] = st.radio(
                                     question['question'],
                                     options=['Yes', 'No'],
-                                    key=key,
-                                    index=0
+                                    key=key
                                 )
                             st.divider()
 
@@ -1468,19 +2017,98 @@ if st.session_state.user_role == 'manager':
                         "Add any additional comments or notes about this employee:",
                         height=100,
                         placeholder="Enter your comments here...",
-                        help="These comments will be included in the email sent to the employee but won't affect the score."
+                        help="These comments will be included in the email sent to the employee but won't affect the score.",
+                        key=f"manager_comment_{selected_employee_id}"
                     )
 
                     st.divider()
 
-                    if st.button("Submit Scorecard", type='primary'):
+                    draft_col, submit_col = st.columns(2)
+
+                    save_draft_clicked = draft_col.button("Save as Draft")
+                    submit_clicked = submit_col.button("Submit Scorecard", type='primary')
+
+                    if save_draft_clicked:
+                        manager_lookup = manager_employees[
+                            manager_employees['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+                        ]
+                        manager_row = manager_lookup.iloc[0] if not manager_lookup.empty else {
+                            'manager_email': st.session_state.manager_email,
+                            'manager_name': st.session_state.manager_name
+                        }
+                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        score, no_count = calculate_score_metrics(answers)
+                        draft_updates = {
+                            'responses': json.dumps(answers),
+                            'comments': manager_comment.strip(),
+                            'questions_score': score,
+                            'number_of_nos': no_count,
+                            'status': 'Draft',
+                            'updated_at': now
+                        }
+
+                        if selected_draft:
+                            if update_response(selected_draft['response_id'], draft_updates):
+                                st.success("Draft saved successfully.")
+                                st.rerun()
+                            else:
+                                st.error("Unable to update draft. Please try again.")
+                        else:
+                            response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
+                            response_entry['status'] = 'Draft'
+                            response_entry['employee_agree'] = ''
+                            response_entry['manager_agree'] = ''
+                            response_entry['executive_agree'] = ''
+                            response_entry['employee_agree_ts'] = ''
+                            response_entry['manager_agree_ts'] = ''
+                            response_entry['executive_agree_ts'] = ''
+                            append_response(response_entry)
+                            st.success("Draft saved successfully.")
+                            st.rerun()
+
+                    if submit_clicked:
                         missing = [qid for qid, value in answers.items() if value in [None, '']]
                         if missing:
                             st.error("Please answer every question before submitting.")
                         else:
-                            manager_row = manager_employees.iloc[0]
-                            response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
-                            append_response(response_entry)
+                            manager_lookup = manager_employees[
+                                manager_employees['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+                            ]
+                            manager_row = manager_lookup.iloc[0] if not manager_lookup.empty else {
+                                'manager_email': st.session_state.manager_email,
+                                'manager_name': st.session_state.manager_name
+                            }
+
+                            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            score, no_count = calculate_score_metrics(answers)
+
+                            if selected_draft:
+                                draft_submit_updates = {
+                                    'responses': json.dumps(answers),
+                                    'comments': manager_comment.strip(),
+                                    'questions_score': score,
+                                    'number_of_nos': no_count,
+                                    'status': 'Pending Employee',
+                                    'employee_agree': '',
+                                    'manager_agree': '',
+                                    'executive_agree': '',
+                                    'employee_agree_ts': '',
+                                    'manager_agree_ts': '',
+                                    'executive_agree_ts': '',
+                                    'employee_token': str(uuid.uuid4()),
+                                    'manager_token': str(uuid.uuid4()),
+                                    'executive_token': str(uuid.uuid4()),
+                                    'updated_at': now
+                                }
+                                updated = update_response(selected_draft['response_id'], draft_submit_updates)
+                                if not updated:
+                                    st.error("Unable to submit draft. Please try again.")
+                                    st.stop()
+
+                                response_entry, _, _ = find_response_by_id(selected_draft['response_id'])
+                            else:
+                                response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
+                                append_response(response_entry)
 
                             stage_email = 'employee'
                             sent, recipient, preview = send_stage_email(response_entry, stage_email)
@@ -1493,6 +2121,9 @@ if st.session_state.user_role == 'manager':
                             if not responses_df.empty:
                                 manager_submissions = responses_df[
                                     responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
+                                ]
+                                manager_submissions = manager_submissions[
+                                    manager_submissions['status'].astype(str).str.strip().str.lower() != 'draft'
                                 ]
                                 reviewed_employee_ids = set(manager_submissions['employee_id'].astype(str).unique())
 
@@ -1572,6 +2203,10 @@ if st.session_state.user_role == 'manager':
                     st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
                     st.markdown("#### Scorecard Details")
+                    manager_questions_for_pdf = load_manager_questions()
+                    employee_questions_for_pdf = load_employee_questions()
+                    employee_responses_for_pdf = load_employee_responses()
+
                     for _, row in manager_responses.iterrows():
                         title = f"{row.get('employee_name', 'Unknown Employee')} • {row.get('status', '')}"
                         with st.expander(title):
@@ -1584,6 +2219,28 @@ if st.session_state.user_role == 'manager':
                                 st.write(f"Updated: {row.get('updated_at', '')}")
                                 st.write(f"Employee: {row.get('employee_email', '')}")
                                 st.write(f"Manager: {row.get('manager_email', '')}")
+
+                            if str(row.get('status', '')).strip() == 'Approved':
+                                employee_self_eval = get_latest_employee_response_for_email(
+                                    employee_responses_for_pdf,
+                                    str(row.get('employee_email', '')).strip().lower()
+                                )
+                                pdf_bytes = generate_scorecard_pdf(
+                                    row,
+                                    manager_questions_for_pdf,
+                                    employee_questions_for_pdf,
+                                    employee_self_eval
+                                )
+                                file_name = f"scorecard_{str(row.get('employee_id', 'employee')).strip()}_{str(row.get('response_id', 'response')).strip()}.pdf"
+                                st.download_button(
+                                    "Download Approved PDF",
+                                    data=pdf_bytes,
+                                    file_name=file_name,
+                                    mime="application/pdf",
+                                    key=f"manager_pdf_{row.get('response_id', '')}"
+                                )
+                            else:
+                                st.caption("PDF download is available only after full approval.")
         except Exception as e:
             st.error(f"Error loading scorecard status: {e}")
             import traceback
