@@ -1,5 +1,33 @@
 # Patch Notes
 
+## Release 1.3.2
+Date: 2026-04-16
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.1
+- Current version: 1.3.2
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Improved PDF layout so all content wraps cleanly within a letter-size page with 1-inch margins.
+
+### What Changed
+1. Set explicit 1-inch margins (top, bottom, left, right) on the PDF document.
+2. Computed usable column widths proportionally from the available page width.
+3. Replaced plain string cells with `Paragraph`-wrapped cells so long question and response text wraps within column boundaries instead of overflowing.
+4. Reduced base font size to 8pt with 10pt leading for a compact, readable layout.
+5. Added bold header row font for all tables.
+6. Section/question/answer columns: 15% / 50% / 35%.
+7. Approval table columns: 20% / 15% / 65%.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+---
+
 ## Release 1.3.1
 Date: 2026-04-16
 Type: Hotfix

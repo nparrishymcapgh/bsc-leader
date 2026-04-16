@@ -602,41 +602,69 @@ def email_managers_with_missing_scorecards(missing_by_manager):
 
 
 def generate_scorecard_pdf(response, manager_questions_df, employee_questions_df, employee_self_eval):
-    story = []
+    from reportlab.lib.units import inch
+
+    MARGIN = 1 * inch
+    PAGE_WIDTH = letter[0] - 2 * MARGIN  # usable width between 1-inch margins
+
+    # Column widths: section(15%), question(50%), answer(35%)
+    col_widths = [PAGE_WIDTH * 0.15, PAGE_WIDTH * 0.50, PAGE_WIDTH * 0.35]
+    # Approval table: role(20%), decision(15%), timestamp(65%)
+    approval_col_widths = [PAGE_WIDTH * 0.20, PAGE_WIDTH * 0.15, PAGE_WIDTH * 0.65]
+
     styles = getSampleStyleSheet()
+    cell_style = styles['Normal']
+    cell_style.fontSize = 8
+    cell_style.leading = 10
+    header_style = styles['Normal']
+
+    def para(text):
+        """Wrap plain text in a Paragraph so it word-wraps within its cell."""
+        return Paragraph(escape(str(text)), cell_style)
+
+    def make_table(rows, col_w, repeat_rows=1):
+        """Build a Table with Paragraph cells so long text wraps."""
+        para_rows = [[para(cell) if isinstance(cell, str) else cell for cell in row] for row in rows]
+        tbl = Table(para_rows, colWidths=col_w, repeatRows=repeat_rows)
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        return tbl
+
+    story = []
     story.append(Paragraph("Leader Level Balanced Score Card", styles['Title']))
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 6))
 
     employee_name = escape(str(response.get('employee_name', '')))
     employee_id = escape(str(response.get('employee_id', '')))
     manager_name = escape(str(response.get('manager_name', '')))
     manager_email = escape(str(response.get('manager_email', '')))
     status = escape(str(response.get('status', '')))
-    story.append(Paragraph(f"Employee: {employee_name} ({employee_id})", styles['Normal']))
-    story.append(Paragraph(f"Manager: {manager_name} ({manager_email})", styles['Normal']))
-    story.append(Paragraph(f"Branch: {escape(str(response.get('branch', '')))} | Dept: {escape(str(response.get('dept', '')))}", styles['Normal']))
-    story.append(Paragraph(f"Status: {status}", styles['Normal']))
-    story.append(Spacer(1, 12))
+    story.append(Paragraph(f"<b>Employee:</b> {employee_name} ({employee_id})", styles['Normal']))
+    story.append(Paragraph(f"<b>Manager:</b> {manager_name} ({manager_email})", styles['Normal']))
+    story.append(Paragraph(f"<b>Branch:</b> {escape(str(response.get('branch', '')))} &nbsp; <b>Dept:</b> {escape(str(response.get('dept', '')))}", styles['Normal']))
+    story.append(Paragraph(f"<b>Status:</b> {status}", styles['Normal']))
+    story.append(Spacer(1, 8))
 
     story.append(Paragraph("Balanced Scorecard Responses", styles['Heading2']))
     manager_answers = parse_response_blob(response.get('responses', {}))
     manager_rows = [["Section", "Question", "Answer"]]
     for _, question in manager_questions_df.fillna("").iterrows():
-        manager_rows.append(
-            [
-                str(question.get('question_section', '')),
-                str(question.get('question', '')),
-                str(manager_answers.get(str(question.get('ID', '')), ''))
-            ]
-        )
-    manager_table = Table(manager_rows, repeatRows=1)
-    manager_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP')
-    ]))
-    story.append(manager_table)
-    story.append(Spacer(1, 12))
+        manager_rows.append([
+            str(question.get('question_section', '')),
+            str(question.get('question', '')),
+            str(manager_answers.get(str(question.get('ID', '')), ''))
+        ])
+    story.append(make_table(manager_rows, col_widths))
+    story.append(Spacer(1, 8))
 
     story.append(Paragraph("Employee Self-Evaluation", styles['Heading2']))
     if employee_self_eval:
@@ -650,25 +678,16 @@ def generate_scorecard_pdf(response, manager_questions_df, employee_questions_df
             stored_value = self_answers.get(response_key)
             if stored_value is None:
                 stored_value = self_answers.get(question_id, "")
-            self_rows.append(
-                [
-                    str(question.get('question_section', '')),
-                    str(question.get('question', '')),
-                    format_compact_employee_answer(question_type, stored_value)
-                ]
-            )
-
-        self_table = Table(self_rows, repeatRows=1)
-        self_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP')
-        ]))
-        story.append(self_table)
+            self_rows.append([
+                str(question.get('question_section', '')),
+                str(question.get('question', '')),
+                format_compact_employee_answer(question_type, stored_value)
+            ])
+        story.append(make_table(self_rows, col_widths))
     else:
         story.append(Paragraph("No employee self-evaluation response found.", styles['Normal']))
 
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 8))
     story.append(Paragraph("Approvals", styles['Heading2']))
     approvals_rows = [
         ["Role", "Decision", "Timestamp"],
@@ -676,16 +695,17 @@ def generate_scorecard_pdf(response, manager_questions_df, employee_questions_df
         ["Manager", str(response.get('manager_agree', '')), str(response.get('manager_agree_ts', ''))],
         ["Executive", str(response.get('executive_agree', '')), str(response.get('executive_agree_ts', ''))]
     ]
-    approvals_table = Table(approvals_rows, repeatRows=1)
-    approvals_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP')
-    ]))
-    story.append(approvals_table)
+    story.append(make_table(approvals_rows, approval_col_widths))
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=MARGIN,
+        rightMargin=MARGIN,
+        topMargin=MARGIN,
+        bottomMargin=MARGIN
+    )
     doc.build(story)
     return buffer.getvalue()
 
