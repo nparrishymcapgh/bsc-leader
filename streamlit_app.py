@@ -1571,157 +1571,6 @@ if st.session_state.user_role == 'manager':
     sidebar_identity = f"{st.session_state.manager_name} ({st.session_state.manager_email})"
 elif st.session_state.user_role == 'executive':
     sidebar_identity = st.session_state.executive_email
-elif st.session_state.user_role == 'executive':
-    st.subheader("Executive Dashboard")
-
-    responses_df = load_responses()
-    responses_df['employee_id'] = responses_df['employee_id'].astype(str)
-    employees_df = st.session_state.employees_df.copy()
-
-    executive_email = st.session_state.get('executive_email', '').strip().lower()
-
-    executive_branches = set(
-        employees_df[
-            employees_df['executive_email'].astype(str).str.strip().str.lower() == executive_email
-        ]['branch'].astype(str).str.strip()
-    )
-    executive_branches = {branch for branch in executive_branches if branch}
-
-    branch_responses = responses_df[
-        responses_df['branch'].astype(str).str.strip().isin(executive_branches)
-    ].copy() if executive_branches else pd.DataFrame(columns=responses_df.columns)
-
-    if branch_responses.empty:
-        branch_responses = responses_df[
-            responses_df['executive_email'].astype(str).str.strip().str.lower() == executive_email
-        ].copy()
-
-    total_count = len(branch_responses)
-    approved_count = int((branch_responses['status'].astype(str) == 'Approved').sum()) if total_count else 0
-    pending_count = int(branch_responses['status'].astype(str).str.startswith('Pending').sum()) if total_count else 0
-    rejected_count = int(branch_responses['status'].astype(str).str.contains('Rejected').sum()) if total_count else 0
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total Scorecards", total_count)
-    k2.metric("Approved", approved_count)
-    k3.metric("Pending", pending_count)
-    k4.metric("Rejected", rejected_count)
-
-    if executive_branches:
-        st.caption(f"Branch scope: {', '.join(sorted(executive_branches))}")
-    else:
-        st.caption("No branch assignment found. Showing scorecards tied directly to your executive email.")
-
-    st.markdown("### Branch Status View")
-    if branch_responses.empty:
-        st.info("No scorecards found for your executive scope.")
-    else:
-        branch_responses = branch_responses.sort_values(['created_at'], ascending=False)
-        st.dataframe(
-            branch_responses[[
-                'employee_name', 'employee_email', 'branch', 'manager_email',
-                'status', 'questions_score', 'created_at', 'updated_at'
-            ]],
-            use_container_width=True,
-            hide_index=True
-        )
-
-        manager_questions_for_pdf = load_manager_questions()
-        employee_questions_for_pdf = load_employee_questions()
-        employee_responses_for_pdf = load_employee_responses()
-
-        st.markdown("### Scorecard Details")
-        for _, row in branch_responses.iterrows():
-            with st.expander(f"{row.get('employee_name', 'Unknown Employee')} ({row.get('employee_id', '')}) • {row.get('status', '')}"):
-                st.write(f"Manager: {row.get('manager_name', '')} ({row.get('manager_email', '')})")
-                st.write(f"Branch: {row.get('branch', '')} | Dept: {row.get('dept', '')}")
-                st.write(f"Score: {row.get('questions_score', '')} | No answers: {row.get('number_of_nos', '')}")
-                st.write(f"Employee approval: {row.get('employee_agree', '')} at {row.get('employee_agree_ts', '')}")
-                st.write(f"Manager approval: {row.get('manager_agree', '')} at {row.get('manager_agree_ts', '')}")
-                st.write(f"Executive approval: {row.get('executive_agree', '')} at {row.get('executive_agree_ts', '')}")
-
-                if str(row.get('status', '')).strip() == 'Approved':
-                    employee_self_eval = get_latest_employee_response_for_email(
-                        employee_responses_for_pdf,
-                        str(row.get('employee_email', '')).strip().lower()
-                    )
-                    pdf_bytes = generate_scorecard_pdf(
-                        row,
-                        manager_questions_for_pdf,
-                        employee_questions_for_pdf,
-                        employee_self_eval
-                    )
-                    file_name = f"scorecard_{str(row.get('employee_id', 'employee')).strip()}_{str(row.get('response_id', 'response')).strip()}.pdf"
-                    st.download_button(
-                        "Download Approved PDF",
-                        data=pdf_bytes,
-                        file_name=file_name,
-                        mime="application/pdf",
-                        key=f"executive_pdf_{row.get('response_id', '')}"
-                    )
-                else:
-                    st.caption("PDF download is available only after full approval.")
-
-    st.divider()
-    st.markdown("### Missing Scorecard Notifications")
-
-    missing_by_manager_branch = get_missing_scorecards_by_manager(
-        employees_df,
-        responses_df,
-        executive_branches if executive_branches else None
-    )
-
-    if missing_by_manager_branch:
-        missing_employee_total = sum(len(items) for items in missing_by_manager_branch.values())
-        st.caption(
-            f"{len(missing_by_manager_branch)} managers are missing {missing_employee_total} employee scorecards in your scope."
-        )
-        if render_mass_email_confirmation(
-            "executive_branch_missing_reviews",
-            "Email All Managers Missing Reviews In My Scope",
-            "Are you sure you want to email every manager in your scope who is missing scorecards?"
-        ):
-            sent_count, failed_emails = email_managers_with_missing_scorecards(missing_by_manager_branch)
-            if failed_emails:
-                st.warning(f"Sent {sent_count} manager notifications. Failed: {', '.join(failed_emails)}")
-            else:
-                st.success(f"Sent notifications to {sent_count} managers.")
-    else:
-        st.info("No missing scorecards found in your scope.")
-
-    if executive_email == EXECUTIVE_ADMIN_EMAIL:
-        st.divider()
-        st.markdown("### Executive Administration")
-
-        if render_mass_email_confirmation(
-            "executive_passwords_admin",
-            "Email Executive Passwords to All Executives",
-            "Are you sure you want to email passwords to all executives?"
-        ):
-            sent_count, failed_emails, admin_error = email_all_executive_passwords(
-                st.session_state.get('executives_df', pd.DataFrame())
-            )
-            if admin_error:
-                st.error(admin_error)
-            elif failed_emails:
-                st.warning(f"Sent {sent_count} executive password emails. Failed: {', '.join(failed_emails)}")
-            else:
-                st.success(f"Sent executive password emails to {sent_count} executives.")
-
-        missing_by_manager_global = get_missing_scorecards_by_manager(employees_df, responses_df)
-        if missing_by_manager_global:
-            if render_mass_email_confirmation(
-                "executive_global_missing_reviews",
-                "Email All Managers Everywhere Missing Reviews",
-                "Are you sure you want to email all managers everywhere who are missing reviews?"
-            ):
-                sent_count, failed_emails = email_managers_with_missing_scorecards(missing_by_manager_global)
-                if failed_emails:
-                    st.warning(f"Sent {sent_count} global manager reminders. Failed: {', '.join(failed_emails)}")
-                else:
-                    st.success(f"Sent global reminders to {sent_count} managers.")
-        else:
-            st.info("No global manager reminders are currently needed.")
 else:
     sidebar_identity = f"{st.session_state.employee_name} ({st.session_state.employee_email})"
 
@@ -2284,6 +2133,157 @@ if st.session_state.user_role == 'manager':
                                     employee_questions_df,
                                     parse_response_blob(self_eval.get('responses', {}))
                                 )
+elif st.session_state.user_role == 'executive':
+    st.subheader("Executive Dashboard")
+
+    responses_df = load_responses()
+    responses_df['employee_id'] = responses_df['employee_id'].astype(str)
+    employees_df = st.session_state.employees_df.copy()
+
+    executive_email = st.session_state.get('executive_email', '').strip().lower()
+
+    executive_branches = set(
+        employees_df[
+            employees_df['executive_email'].astype(str).str.strip().str.lower() == executive_email
+        ]['branch'].astype(str).str.strip()
+    )
+    executive_branches = {branch for branch in executive_branches if branch}
+
+    branch_responses = responses_df[
+        responses_df['branch'].astype(str).str.strip().isin(executive_branches)
+    ].copy() if executive_branches else pd.DataFrame(columns=responses_df.columns)
+
+    if branch_responses.empty:
+        branch_responses = responses_df[
+            responses_df['executive_email'].astype(str).str.strip().str.lower() == executive_email
+        ].copy()
+
+    total_count = len(branch_responses)
+    approved_count = int((branch_responses['status'].astype(str) == 'Approved').sum()) if total_count else 0
+    pending_count = int(branch_responses['status'].astype(str).str.startswith('Pending').sum()) if total_count else 0
+    rejected_count = int(branch_responses['status'].astype(str).str.contains('Rejected').sum()) if total_count else 0
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total Scorecards", total_count)
+    k2.metric("Approved", approved_count)
+    k3.metric("Pending", pending_count)
+    k4.metric("Rejected", rejected_count)
+
+    if executive_branches:
+        st.caption(f"Branch scope: {', '.join(sorted(executive_branches))}")
+    else:
+        st.caption("No branch assignment found. Showing scorecards tied directly to your executive email.")
+
+    st.markdown("### Branch Status View")
+    if branch_responses.empty:
+        st.info("No scorecards found for your executive scope.")
+    else:
+        branch_responses = branch_responses.sort_values(['created_at'], ascending=False)
+        st.dataframe(
+            branch_responses[[
+                'employee_name', 'employee_email', 'branch', 'manager_email',
+                'status', 'questions_score', 'created_at', 'updated_at'
+            ]],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        manager_questions_for_pdf = load_manager_questions()
+        employee_questions_for_pdf = load_employee_questions()
+        employee_responses_for_pdf = load_employee_responses()
+
+        st.markdown("### Scorecard Details")
+        for _, row in branch_responses.iterrows():
+            with st.expander(f"{row.get('employee_name', 'Unknown Employee')} ({row.get('employee_id', '')}) • {row.get('status', '')}"):
+                st.write(f"Manager: {row.get('manager_name', '')} ({row.get('manager_email', '')})")
+                st.write(f"Branch: {row.get('branch', '')} | Dept: {row.get('dept', '')}")
+                st.write(f"Score: {row.get('questions_score', '')} | No answers: {row.get('number_of_nos', '')}")
+                st.write(f"Employee approval: {row.get('employee_agree', '')} at {row.get('employee_agree_ts', '')}")
+                st.write(f"Manager approval: {row.get('manager_agree', '')} at {row.get('manager_agree_ts', '')}")
+                st.write(f"Executive approval: {row.get('executive_agree', '')} at {row.get('executive_agree_ts', '')}")
+
+                if str(row.get('status', '')).strip() == 'Approved':
+                    employee_self_eval = get_latest_employee_response_for_email(
+                        employee_responses_for_pdf,
+                        str(row.get('employee_email', '')).strip().lower()
+                    )
+                    pdf_bytes = generate_scorecard_pdf(
+                        row,
+                        manager_questions_for_pdf,
+                        employee_questions_for_pdf,
+                        employee_self_eval
+                    )
+                    file_name = f"scorecard_{str(row.get('employee_id', 'employee')).strip()}_{str(row.get('response_id', 'response')).strip()}.pdf"
+                    st.download_button(
+                        "Download Approved PDF",
+                        data=pdf_bytes,
+                        file_name=file_name,
+                        mime="application/pdf",
+                        key=f"executive_pdf_{row.get('response_id', '')}"
+                    )
+                else:
+                    st.caption("PDF download is available only after full approval.")
+
+    st.divider()
+    st.markdown("### Missing Scorecard Notifications")
+
+    missing_by_manager_branch = get_missing_scorecards_by_manager(
+        employees_df,
+        responses_df,
+        executive_branches if executive_branches else None
+    )
+
+    if missing_by_manager_branch:
+        missing_employee_total = sum(len(items) for items in missing_by_manager_branch.values())
+        st.caption(
+            f"{len(missing_by_manager_branch)} managers are missing {missing_employee_total} employee scorecards in your scope."
+        )
+        if render_mass_email_confirmation(
+            "executive_branch_missing_reviews",
+            "Email All Managers Missing Reviews In My Scope",
+            "Are you sure you want to email every manager in your scope who is missing scorecards?"
+        ):
+            sent_count, failed_emails = email_managers_with_missing_scorecards(missing_by_manager_branch)
+            if failed_emails:
+                st.warning(f"Sent {sent_count} manager notifications. Failed: {', '.join(failed_emails)}")
+            else:
+                st.success(f"Sent notifications to {sent_count} managers.")
+    else:
+        st.info("No missing scorecards found in your scope.")
+
+    if executive_email == EXECUTIVE_ADMIN_EMAIL:
+        st.divider()
+        st.markdown("### Executive Administration")
+
+        if render_mass_email_confirmation(
+            "executive_passwords_admin",
+            "Email Executive Passwords to All Executives",
+            "Are you sure you want to email passwords to all executives?"
+        ):
+            sent_count, failed_emails, admin_error = email_all_executive_passwords(
+                st.session_state.get('executives_df', pd.DataFrame())
+            )
+            if admin_error:
+                st.error(admin_error)
+            elif failed_emails:
+                st.warning(f"Sent {sent_count} executive password emails. Failed: {', '.join(failed_emails)}")
+            else:
+                st.success(f"Sent executive password emails to {sent_count} executives.")
+
+        missing_by_manager_global = get_missing_scorecards_by_manager(employees_df, responses_df)
+        if missing_by_manager_global:
+            if render_mass_email_confirmation(
+                "executive_global_missing_reviews",
+                "Email All Managers Everywhere Missing Reviews",
+                "Are you sure you want to email all managers everywhere who are missing reviews?"
+            ):
+                sent_count, failed_emails = email_managers_with_missing_scorecards(missing_by_manager_global)
+                if failed_emails:
+                    st.warning(f"Sent {sent_count} global manager reminders. Failed: {', '.join(failed_emails)}")
+                else:
+                    st.success(f"Sent global reminders to {sent_count} managers.")
+        else:
+            st.info("No global manager reminders are currently needed.")
 else:
     employee_row = st.session_state.employees_df[
         st.session_state.employees_df['email'].astype(str).str.lower() == st.session_state.employee_email

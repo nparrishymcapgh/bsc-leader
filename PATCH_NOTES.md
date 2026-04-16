@@ -1,5 +1,28 @@
 # Patch Notes
 
+## Release 1.3.1
+Date: 2026-04-16
+Type: Hotfix
+
+### Version Control
+- Previous version: 1.3
+- Current version: 1.3.1
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Fixed a regression where executives were incorrectly routed to the Employee Dashboard instead of the Executive Dashboard after login.
+
+### What Changed
+1. Corrected duplicate `elif` block structure in the main routing chain.
+2. Executive dashboard (`elif user_role == 'executive':`) is now properly placed in the dashboard routing chain so executives land on the correct dashboard.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+---
+
 ## Release 1.3
 Date: 2026-04-16
 Type: Feature Release
