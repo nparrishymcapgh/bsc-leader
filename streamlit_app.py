@@ -927,6 +927,25 @@ def send_self_evaluation_reminder_email(employee, manager_name):
     return success, recipient, app_url
 
 
+def get_employees_missing_self_evaluation(employees_df, employee_responses_df):
+    if employees_df.empty:
+        return employees_df
+
+    if employee_responses_df.empty or 'employee_email' not in employee_responses_df.columns:
+        return employees_df.copy()
+
+    submitted_emails = set(
+        employee_responses_df['employee_email']
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
+
+    return employees_df[
+        ~employees_df['email'].astype(str).str.strip().str.lower().isin(submitted_emails)
+    ].copy()
+
+
 def process_action(action, response_id, token):
     try:
         response, _, _ = find_response_by_id(response_id)
@@ -1269,6 +1288,54 @@ if st.session_state.user_role == 'manager':
                 available_employees['ID'].astype(str).tolist(),
                 format_func=lambda eid: f"{available_employees[available_employees['ID'].astype(str) == eid].iloc[0]['name']} ({eid})"
             )
+
+            missing_self_eval_employees = get_employees_missing_self_evaluation(
+                available_employees,
+                employee_self_responses_df
+            )
+
+            st.markdown("### Bulk reminder emails")
+            if missing_self_eval_employees.empty:
+                st.info("All employees who still need a scorecard already submitted their self-evaluation.")
+            else:
+                st.caption(
+                    f"{len(missing_self_eval_employees)} employees under you still need to submit a self-evaluation before their scorecard can be completed."
+                )
+                if st.button("Send Reminder Emails to All Incomplete Employees", key="send_bulk_self_eval_reminders"):
+                    sent_recipients = []
+                    failed_recipients = []
+                    app_url_hint = ""
+
+                    with st.spinner("Sending reminder emails..."):
+                        for _, employee_row in missing_self_eval_employees.iterrows():
+                            sent, recipient, app_url = send_self_evaluation_reminder_email(employee_row, st.session_state.manager_name)
+                            if app_url and not app_url_hint:
+                                app_url_hint = app_url
+                            if sent:
+                                sent_recipients.append(recipient)
+                            else:
+                                failed_recipients.append(recipient or str(employee_row.get('name', 'Unknown employee')))
+
+                    if sent_recipients:
+                        st.success(f"Sent {len(sent_recipients)} reminder emails.")
+
+                    if failed_recipients:
+                        st.warning(f"Could not send {len(failed_recipients)} reminder emails.")
+                        st.write("Failed recipients:")
+                        for recipient in failed_recipients[:10]:
+                            st.write(f"- {recipient}")
+                        if len(failed_recipients) > 10:
+                            st.write(f"- ... and {len(failed_recipients) - 10} more")
+
+                    if failed_recipients and app_url_hint:
+                        st.info("Share this app link with employees if email is unavailable:")
+                        st.code(app_url_hint)
+
+                    if failed_recipients and not app_url_hint:
+                        st.info("Set app.url in Streamlit secrets so reminder emails can include a direct link.")
+
+            st.divider()
+
             selected_employee = available_employees[available_employees['ID'].astype(str) == selected_employee_id].iloc[0]
             selected_employee_email = str(selected_employee.get('email', '')).strip().lower()
             selected_employee_self_eval = get_latest_employee_response_for_email(
