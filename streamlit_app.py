@@ -9,7 +9,6 @@ import smtplib
 from email.message import EmailMessage
 from urllib.parse import urlencode
 import time
-from functools import lru_cache
 
 # ============================================================================
 # PAGE CONFIG
@@ -88,6 +87,7 @@ EMPLOYEE_QUESTIONS_TAB = "Employee_Questions"
 EMPLOYEE_RESPONSES_TAB = "Employee_Responses"
 MANAGERS_TAB = "Managers"
 PASSWORD_ADMIN_EMAIL = "nparrish@ymcapgh.org"
+DEFAULT_DATA_SYNC_MINUTES = 5
 
 MANAGER_RESPONSE_COLUMNS = [
     "response_id", "created_at", "updated_at", "manager_email", "manager_name",
@@ -114,6 +114,7 @@ EMPLOYEE_RESPONSE_COLUMNS = [
 # from_email = "no-reply@example.com"
 # [app]
 # url = "https://your-app-url.streamlit.app"
+# data_sync_minutes = 5
 
 # ============================================================================
 # GOOGLE SHEETS UTILITIES
@@ -144,8 +145,7 @@ def get_spreadsheet():
         st.info("Please check your service account configuration and Google Sheet permissions.")
         st.stop()
 
-@st.cache_data(ttl=3600)
-@lru_cache(maxsize=None)
+@st.cache_data(ttl=300)
 def load_sheet(tab_name):
     spreadsheet = get_spreadsheet()
     try:
@@ -189,6 +189,30 @@ def ensure_sheet_headers(worksheet, headers):
 
     return worksheet
 
+
+def get_data_sync_minutes():
+    raw_value = st.secrets.get("app", {}).get("data_sync_minutes", DEFAULT_DATA_SYNC_MINUTES)
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        return DEFAULT_DATA_SYNC_MINUTES
+
+
+def clear_data_caches():
+    load_sheet.clear()
+    load_responses.clear()
+    load_employee_responses.clear()
+
+
+def sync_session_data():
+    st.session_state.employees_df = load_sheet(EMPLOYEES_TAB)
+    st.session_state.questions_df = load_sheet(QUESTIONS_TAB)
+    st.session_state.managers_df = load_sheet(MANAGERS_TAB)
+    st.session_state.responses_df = load_responses()
+    st.session_state.data_loaded = True
+    st.session_state.last_data_sync_ts = time.time()
+
+@st.cache_data(ttl=300)
 def load_responses():
     """Load responses from the Responses sheet."""
     try:
@@ -225,6 +249,7 @@ def ensure_employee_responses_sheet(spreadsheet):
     return ensure_sheet_headers(worksheet, EMPLOYEE_RESPONSE_COLUMNS)
 
 
+@st.cache_data(ttl=300)
 def load_employee_responses():
     try:
         spreadsheet = get_spreadsheet()
@@ -1087,20 +1112,6 @@ if debug_mode:
     st.session_state.user_role = 'manager'
     st.session_state.manager_email = 'debug@mode.com'
     st.session_state.manager_name = 'Debug User'
-    st.session_state.data_loaded = getattr(st.session_state, 'data_loaded', False)
-    if not st.session_state.data_loaded:
-        with st.spinner("Loading data..."):
-            employees_df = load_sheet(EMPLOYEES_TAB)
-            questions_df = load_sheet(QUESTIONS_TAB)
-            managers_df = load_sheet(MANAGERS_TAB)
-            responses_df = load_responses()
-            st.session_state.employees_df = employees_df
-            st.session_state.questions_df = questions_df
-            st.session_state.managers_df = managers_df
-            st.session_state.responses_df = responses_df
-            st.session_state.data_loaded = True
-    responses_df = load_responses()
-    responses_df['employee_id'] = responses_df['employee_id'].astype(str)
 
 if 'logged_in' not in st.session_state:
     reset_login_state()
@@ -1118,17 +1129,21 @@ if 'employee_name' not in st.session_state:
 if 'managers_df' not in st.session_state:
     st.session_state.managers_df = load_sheet(MANAGERS_TAB)
 
+if 'last_data_sync_ts' not in st.session_state:
+    st.session_state.last_data_sync_ts = 0.0
+
+if 'sync_notice' not in st.session_state:
+    st.session_state.sync_notice = ""
+
+sync_interval_minutes = get_data_sync_minutes()
+sync_age_seconds = time.time() - float(st.session_state.get('last_data_sync_ts', 0.0))
+if st.session_state.data_loaded and sync_age_seconds >= sync_interval_minutes * 60:
+    clear_data_caches()
+    st.session_state.data_loaded = False
+
 if not st.session_state.data_loaded:
     with st.spinner("Loading data..."):
-        employees_df = load_sheet(EMPLOYEES_TAB)
-        questions_df = load_sheet(QUESTIONS_TAB)
-        managers_df = load_sheet(MANAGERS_TAB)
-        responses_df = load_responses()
-        st.session_state.employees_df = employees_df
-        st.session_state.questions_df = questions_df
-        st.session_state.managers_df = managers_df
-        st.session_state.responses_df = responses_df
-        st.session_state.data_loaded = True
+        sync_session_data()
 
 if not st.session_state.logged_in:
     manager_col, employee_col = st.columns(2)
@@ -1199,6 +1214,18 @@ else:
 
 st.sidebar.markdown(f"**Signed in as:** {sidebar_identity}")
 st.sidebar.caption(f"Role: {st.session_state.user_role.title()}")
+st.sidebar.caption(f"Auto-sync: every {sync_interval_minutes} minute(s)")
+
+if st.sidebar.button("Sync Data from Google Sheets Now"):
+    clear_data_caches()
+    st.session_state.data_loaded = False
+    st.session_state.sync_notice = "Data synced from Google Sheets."
+    st.rerun()
+
+if st.session_state.get('sync_notice'):
+    st.sidebar.success(st.session_state.sync_notice)
+    st.session_state.sync_notice = ""
+
 if st.sidebar.button("Logout"):
     reset_login_state()
     st.rerun()
