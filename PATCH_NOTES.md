@@ -1,5 +1,40 @@
 # Patch Notes
 
+## Release 1.3.3
+Date: 2026-04-17
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.2
+- Current version: 1.3.3
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Updated employee self-evaluation behavior so submitted responses remain editable until the manager scorecard enters approval, then lock automatically.
+
+### What Changed
+1. Replaced employee self-evaluation "delete and start over" flow with in-place edit and update.
+2. Added manager-status lock logic for employee self-evaluations:
+   - Editable when there is no manager scorecard for the employee.
+   - Editable when the latest manager scorecard status is `Draft`.
+   - Read-only once the latest manager scorecard status is any non-`Draft` status (approval/in-progress/completed).
+3. Added status-aware lock messaging on the employee dashboard.
+4. Preserved editability after manager rejection reset by relying on the manager scorecard reset/removal behavior.
+
+### Files Updated
+- streamlit_app.py
+- README.md
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py`
+2. Environment, sheets, SMTP, and app-url integration check:
+   - `/workspaces/bsc-leader/.venv/bin/python test_setup.py`
+
+---
+
 ## Release 1.3.2
 Date: 2026-04-16
 Type: Patch

@@ -514,6 +514,39 @@ def get_latest_manager_draft_response(responses_df, manager_email, employee_id):
     return matches.sort_values('sort_timestamp', ascending=False).iloc[0].to_dict()
 
 
+def get_latest_manager_response_for_employee(responses_df, employee_id):
+    if responses_df.empty:
+        return None
+
+    matches = responses_df[
+        responses_df['employee_id'].astype(str).str.strip() == str(employee_id).strip()
+    ].copy()
+
+    if matches.empty:
+        return None
+
+    if 'updated_at' in matches.columns:
+        matches['sort_timestamp'] = matches['updated_at'].astype(str)
+    elif 'created_at' in matches.columns:
+        matches['sort_timestamp'] = matches['created_at'].astype(str)
+    else:
+        matches['sort_timestamp'] = ""
+
+    return matches.sort_values('sort_timestamp', ascending=False).iloc[0].to_dict()
+
+
+def manager_response_locks_employee_self_eval(manager_response):
+    if not manager_response:
+        return False
+
+    status = str(manager_response.get('status', '')).strip().lower()
+    if not status:
+        return False
+
+    # Draft reviews can coexist with editable self-evals; any non-draft status is in/after approval flow.
+    return status != 'draft'
+
+
 def get_missing_scorecards_by_manager(employees_df, responses_df, branch_names=None):
     if employees_df.empty:
         return {}
@@ -820,6 +853,41 @@ def append_employee_response(row):
     worksheet.append_row(ordered_row)
 
 
+def update_employee_response(response_id, updates):
+    try:
+        spreadsheet = get_spreadsheet()
+        worksheet = ensure_employee_responses_sheet(spreadsheet)
+        records = worksheet.get_all_records()
+        df = ensure_dataframe_columns(pd.DataFrame(records), EMPLOYEE_RESPONSE_COLUMNS)
+
+        if df.empty:
+            return False
+
+        match = df[df['response_id'] == response_id]
+        if match.empty:
+            return False
+
+        row_index = match.index[0] + 2
+        header = worksheet.row_values(1)
+        row_values = worksheet.row_values(row_index)
+        row_data = {header[i]: row_values[i] if i < len(row_values) else "" for i in range(len(header))}
+
+        for key, value in updates.items():
+            if key not in header:
+                header.append(key)
+                worksheet.update(f"{column_letter(len(header))}{1}", [[key]])
+                row_data[key] = value
+            row_data[key] = value
+
+        ordered_row = [row_data.get(col, "") for col in header]
+        update_range = f"A{row_index}:{column_letter(len(header))}{row_index}"
+        worksheet.update(update_range, [ordered_row])
+        return True
+    except Exception as e:
+        st.error(f"Unable to update employee response: {e}")
+        return False
+
+
 def delete_employee_response(response_id):
     try:
         spreadsheet = get_spreadsheet()
@@ -1045,9 +1113,10 @@ def prepare_employee_questions(question_rows):
     return prepared_questions
 
 
-def render_employee_question_inputs(question_rows, key_prefix):
+def render_employee_question_inputs(question_rows, key_prefix, initial_answers=None, read_only=False):
     answers = {}
     prepared_questions = prepare_employee_questions(question_rows)
+    initial_answers = initial_answers or {}
 
     grouped_sections = prepared_questions.groupby('question_section', dropna=False, sort=False)
 
@@ -1060,22 +1129,35 @@ def render_employee_question_inputs(question_rows, key_prefix):
             response_key = str(question['_response_key'])
             question_type = normalize_employee_question_type(question.get('type', ''))
 
+            stored_value = initial_answers.get(response_key)
+            if stored_value is None:
+                stored_value = initial_answers.get(question_id, [] if question_type == "three_line" else "")
+            value = ensure_employee_answer_shape(question.get('type', ''), stored_value)
+
             st.markdown(f"**{question['question']}**")
             if question_type == "three_line":
                 line_values = []
-                for line_number in range(1, 4):
+                for line_number, line_value in enumerate(value, start=1):
+                    widget_key = f"{key_prefix}_{response_key}_line_{line_number}"
+                    if widget_key not in st.session_state:
+                        st.session_state[widget_key] = line_value
                     line_values.append(
                         st.text_input(
                             f"Line {line_number}",
-                            key=f"{key_prefix}_{response_key}_line_{line_number}"
+                            key=widget_key,
+                            disabled=read_only
                         )
                     )
                 answers[response_key] = line_values
             else:
+                widget_key = f"{key_prefix}_{response_key}"
+                if widget_key not in st.session_state:
+                    st.session_state[widget_key] = value
                 answers[response_key] = st.text_area(
                     "Response",
-                    key=f"{key_prefix}_{response_key}",
+                    key=widget_key,
                     height=120,
+                    disabled=read_only,
                     label_visibility='collapsed'
                 )
             st.divider()
@@ -2321,28 +2403,69 @@ else:
     st.divider()
 
     employee_questions_df = load_employee_questions()
-    employee_responses_df = load_employee_responses()
+    manager_responses_df = load_responses()
+    manager_responses_df['employee_id'] = manager_responses_df['employee_id'].astype(str)
     existing_response, _, _ = find_employee_response_by_email(st.session_state.employee_email)
 
     if employee_questions_df.empty:
         st.warning("The Employee_Questions sheet is empty. Please add questions to the Google Sheet.")
         st.stop()
 
-    if existing_response:
-        st.markdown("### Your submitted response")
-        st.caption("You have already submitted your employee response. Delete it if you need to start over.")
-        display_employee_response(
-            employee_questions_df,
-            parse_response_blob(existing_response.get('responses', {})),
-            key_prefix=f"employee_existing_{existing_response['response_id']}"
-        )
+    latest_manager_response = get_latest_manager_response_for_employee(
+        manager_responses_df,
+        str(employee_record['ID'])
+    )
+    self_eval_locked = manager_response_locks_employee_self_eval(latest_manager_response)
+    manager_status = str(latest_manager_response.get('status', '')).strip() if latest_manager_response else ""
 
-        if st.button("Delete Existing Response and Start Over", type='primary'):
-            if delete_employee_response(existing_response['response_id']):
-                st.success("Your existing response was deleted. You can now submit a new one.")
-                st.rerun()
+    if existing_response:
+        existing_answers = parse_response_blob(existing_response.get('responses', {}))
+
+        if self_eval_locked:
+            st.markdown("### Your submitted response")
+            if manager_status:
+                st.caption(f"Your self-evaluation is locked because your manager scorecard is currently in status: {manager_status}.")
             else:
-                st.error("Unable to delete your response. Please try again.")
+                st.caption("Your self-evaluation is locked because your manager scorecard has entered approval.")
+            display_employee_response(
+                employee_questions_df,
+                existing_answers,
+                key_prefix=f"employee_locked_{existing_response['response_id']}",
+                read_only=True
+            )
+        else:
+            st.markdown("### Edit your submitted response")
+            st.caption("You can edit your self-evaluation until your manager scorecard enters approval.")
+            editable_answers = render_employee_question_inputs(
+                employee_questions_df,
+                key_prefix=f"employee_edit_{existing_response['response_id']}",
+                initial_answers=existing_answers,
+                read_only=False
+            )
+
+            if st.button("Update Employee Response", type='primary'):
+                missing_answers = [
+                    question_id for question_id, answer in editable_answers.items()
+                    if not employee_answer_complete(answer)
+                ]
+
+                if missing_answers:
+                    st.error("Please answer every employee question before updating.")
+                else:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    updated = update_employee_response(
+                        existing_response['response_id'],
+                        {
+                            'responses': json.dumps(editable_answers),
+                            'updated_at': now,
+                            'status': 'Submitted'
+                        }
+                    )
+                    if updated:
+                        st.success("Your employee response has been updated.")
+                        st.rerun()
+                    else:
+                        st.error("Unable to update your response. Please try again.")
     else:
         st.markdown("### Submit your employee response")
         st.caption("Each employee can submit one response for themselves. Your answers do not affect scorecard scoring.")

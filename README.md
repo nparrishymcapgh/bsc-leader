@@ -228,7 +228,9 @@ Employee response behavior:
 - Employees log in using the `email` column from the `Employees` tab.
 - Each employee can have only one active record in `Employee_Responses`.
 - If a response already exists, the employee sees it instead of a blank form.
-- Employees can delete their existing response and submit a new one for themselves.
+- Employees can edit and update their existing response while no manager scorecard exists or the manager scorecard is still in `Draft`.
+- Once the manager scorecard enters approval (any non-`Draft` manager status), the employee self-evaluation becomes read-only.
+- If a manager scorecard is rejected and reset/removed, the employee self-evaluation becomes editable again.
 - Managers cannot submit a scorecard for an employee until that employee has a self-evaluation on file.
 - If a self-evaluation is missing, the manager dashboard can send a reminder email to the employee with the app link.
 - Managers can view submitted self-evaluations at any time in the `Employee Self-Evaluations` tab.
