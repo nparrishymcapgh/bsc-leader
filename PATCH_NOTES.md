@@ -1,5 +1,34 @@
 # Patch Notes
 
+## Release 1.3.6
+Date: 2026-04-20
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.5
+- Current version: 1.3.6
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Added manager comment output to the final approved balanced scorecard PDF.
+
+### What Changed
+1. Updated PDF generation to include a new `Manager Comments` section in the scorecard export.
+2. Manager comments now print from the response `comments` field.
+3. Multi-line manager comments preserve line breaks in the PDF.
+4. If no comments are present, the PDF shows `No manager comments provided.`
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py`
+2. Environment, sheets, SMTP, and app-url integration check:
+   - `/workspaces/bsc-leader/.venv/bin/python test_setup.py`
+
 ## Release 1.3.5
 Date: 2026-04-20
 Type: Patch

@@ -744,6 +744,15 @@ def generate_scorecard_pdf(response, manager_questions_df, employee_questions_df
         story.append(Paragraph("No employee self-evaluation response found.", styles['Normal']))
 
     story.append(Spacer(1, 8))
+    story.append(Paragraph("Manager Comments", styles['Heading2']))
+    manager_comments = str(response.get('comments', '')).strip()
+    if manager_comments:
+        comments_html = escape(manager_comments).replace("\n", "<br/>")
+        story.append(Paragraph(comments_html, styles['Normal']))
+    else:
+        story.append(Paragraph("No manager comments provided.", styles['Normal']))
+
+    story.append(Spacer(1, 8))
     story.append(Paragraph("Approvals", styles['Heading2']))
     approvals_rows = [
         ["Role", "Decision", "Timestamp"],
