@@ -278,6 +278,18 @@ def load_employee_responses():
 def get_app_url():
     return st.secrets.get("app", {}).get("url", "").rstrip("/")
 
+
+def get_manager_sender_email(default_email=""):
+    session_manager_email = str(st.session_state.get("manager_email", "")).strip().lower()
+    if session_manager_email and "@" in session_manager_email:
+        return session_manager_email
+
+    fallback_email = str(default_email).strip().lower()
+    if fallback_email and "@" in fallback_email:
+        return fallback_email
+
+    return ""
+
 def build_action_link(response_id, token, action):
     base = get_app_url()
     if not base:
@@ -290,7 +302,7 @@ def build_action_link(response_id, token, action):
     return f"{base}/?{urlencode(params)}"
 
 
-def send_email(subject, html_body, recipient):
+def send_email(subject, html_body, recipient, sender_email=""):
     smtp_config = st.secrets.get("smtp", {})
     if not smtp_config:
         return False
@@ -298,7 +310,8 @@ def send_email(subject, html_body, recipient):
     try:
         message = EmailMessage()
         message["Subject"] = subject
-        message["From"] = smtp_config.get("from_email", smtp_config.get("username"))
+        resolved_sender = get_manager_sender_email(sender_email)
+        message["From"] = resolved_sender or smtp_config.get("from_email", smtp_config.get("username"))
         message["To"] = recipient
         message.set_content("Please view this message in an HTML-capable email client.")
         message.add_alternative(html_body, subtype="html")
@@ -340,7 +353,7 @@ def send_manager_password_email(manager_email, manager_password, manager_name=""
     if app_url:
         body.append(f"<p><a href=\"{app_url}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Open the app</a></p>")
     body.append("<p>If you were not expecting this email, contact the app administrator.</p>")
-    return send_email(subject, "".join(body), manager_email)
+    return send_email(subject, "".join(body), manager_email, sender_email=manager_email)
 
 
 def email_all_manager_passwords(managers_df):
@@ -617,7 +630,7 @@ def send_missing_scorecard_email_to_manager(manager_email, manager_name, missing
         body.append(f"<p><a href=\"{app_url}\" style=\"background:#006B6B;color:white;padding:10px 14px;text-decoration:none;border-radius:4px;\">Open the app</a></p>")
 
     body.append("<p>Please submit these reviews as soon as possible.</p>")
-    return send_email(subject, "".join(body), manager_email)
+    return send_email(subject, "".join(body), manager_email, sender_email=manager_email)
 
 
 def email_managers_with_missing_scorecards(missing_by_manager):
@@ -1310,7 +1323,7 @@ def send_stage_email(response, stage):
 
     # Only send email if recipient is valid
     if recipient and '@' in recipient:
-        success = send_email(subject, body, recipient)
+        success = send_email(subject, body, recipient, sender_email=response.get('manager_email', ''))
         return success, recipient, body
     else:
         # No valid recipient, return success=False but don't show error for missing executive emails
@@ -1342,11 +1355,11 @@ def send_rejection_notice_to_manager(response, rejected_by_role, rejected_by_nam
     else:
         body.append("<p>Please return to the app and submit a new review.</p>")
 
-    success = send_email(subject, "".join(body), recipient)
+    success = send_email(subject, "".join(body), recipient, sender_email=response.get('manager_email', ''))
     return success, recipient
 
 
-def send_self_evaluation_reminder_email(employee, manager_name):
+def send_self_evaluation_reminder_email(employee, manager_name, manager_email):
     recipient = str(employee.get('email', '')).strip()
     if not recipient or '@' not in recipient:
         return False, recipient, ""
@@ -1357,7 +1370,8 @@ def send_self_evaluation_reminder_email(employee, manager_name):
         "<h2>Self-evaluation required</h2>",
         f"<p>Hello {employee.get('name', 'Employee')},</p>",
         f"<p>{manager_name} is ready to complete your balanced score card review, but your self-evaluation has not been submitted yet.</p>",
-        "<p>Please log in to the Leader Level Balanced Score Card app using your employee email and submit your self-evaluation.</p>"
+        "<p>Please log in to the Leader Level Balanced Score Card app using your employee email and submit your self-evaluation.</p>",
+        "<p><a href=\"https://drive.google.com/file/d/1ZboHZAlHWBv-2eqPiTEaBtqygg-9qRya/view?usp=sharing\">Learn more about YMCA Leadership Competencies here!</a></p>"
     ]
 
     if app_url:
@@ -1368,7 +1382,7 @@ def send_self_evaluation_reminder_email(employee, manager_name):
 
     body.append("<p>Thank you.</p>")
 
-    success = send_email(subject, "".join(body), recipient)
+    success = send_email(subject, "".join(body), recipient, sender_email=manager_email)
     return success, recipient, app_url
 
 
@@ -1813,7 +1827,11 @@ if st.session_state.user_role == 'manager':
 
                     with st.spinner("Sending reminder emails..."):
                         for _, employee_row in missing_self_eval_employees.iterrows():
-                            sent, recipient, app_url = send_self_evaluation_reminder_email(employee_row, st.session_state.manager_name)
+                            sent, recipient, app_url = send_self_evaluation_reminder_email(
+                                employee_row,
+                                st.session_state.manager_name,
+                                st.session_state.manager_email
+                            )
                             if app_url and not app_url_hint:
                                 app_url_hint = app_url
                             if sent:
@@ -1885,7 +1903,11 @@ if st.session_state.user_role == 'manager':
                 st.warning("This employee has not submitted a self-evaluation yet. Manager review is disabled until they submit one.")
                 reminder_button_key = f"send_self_eval_reminder_{selected_employee_id}"
                 if st.button("Send Self-Evaluation Reminder Email", key=reminder_button_key):
-                    sent, recipient, app_url = send_self_evaluation_reminder_email(selected_employee, st.session_state.manager_name)
+                    sent, recipient, app_url = send_self_evaluation_reminder_email(
+                        selected_employee,
+                        st.session_state.manager_name,
+                        st.session_state.manager_email
+                    )
                     if sent:
                         st.success(f"Reminder email sent to {recipient}.")
                     else:

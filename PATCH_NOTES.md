@@ -1,5 +1,36 @@
 # Patch Notes
 
+## Release 1.3.4
+Date: 2026-04-20
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.3
+- Current version: 1.3.4
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Updated outbound email sender behavior to use manager email context and enhanced self-evaluation reminder content.
+
+### What Changed
+1. Added sender resolution logic so outbound email headers prefer `manager_email` when available.
+2. Updated scorecard workflow emails to pass manager email context as the sender where applicable.
+3. Updated self-evaluation reminder email flow to pass the logged-in manager email as the sender.
+4. Added the requested competencies resource link to self-evaluation reminders:
+   - Text: `Learn more about YMCA Leadership Competencies here!`
+   - URL: `https://drive.google.com/file/d/1ZboHZAlHWBv-2eqPiTEaBtqygg-9qRya/view?usp=sharing`
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py`
+2. Environment, sheets, SMTP, and app-url integration check:
+   - `/workspaces/bsc-leader/.venv/bin/python test_setup.py`
+
 ## Release 1.3.3
 Date: 2026-04-17
 Type: Patch
