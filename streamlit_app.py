@@ -302,24 +302,34 @@ def build_action_link(response_id, token, action):
     return f"{base}/?{urlencode(params)}"
 
 
-def send_email(subject, html_body, recipient, sender_email=""):
+def send_email(subject, html_body, recipient, sender_email="", require_sender=False):
     smtp_config = st.secrets.get("smtp", {})
     if not smtp_config:
         return False
 
     try:
+        resolved_sender = get_manager_sender_email(sender_email)
+        if require_sender and not resolved_sender:
+            st.error("Email send failed: valid manager email is required as the sender.")
+            return False
+
+        default_sender = smtp_config.get("from_email", smtp_config.get("username"))
+        from_header = resolved_sender or default_sender
+        envelope_sender = resolved_sender or smtp_config.get("username") or default_sender
+
         message = EmailMessage()
         message["Subject"] = subject
-        resolved_sender = get_manager_sender_email(sender_email)
-        message["From"] = resolved_sender or smtp_config.get("from_email", smtp_config.get("username"))
+        message["From"] = from_header
         message["To"] = recipient
+        if resolved_sender:
+            message["Reply-To"] = resolved_sender
         message.set_content("Please view this message in an HTML-capable email client.")
         message.add_alternative(html_body, subtype="html")
 
         server = smtplib.SMTP(smtp_config["server"], int(smtp_config.get("port", 587)))
         server.starttls()
         server.login(smtp_config["username"], smtp_config["password"])
-        server.send_message(message)
+        server.send_message(message, from_addr=envelope_sender, to_addrs=[recipient])
         server.quit()
         return True
     except Exception as exc:
@@ -1382,7 +1392,13 @@ def send_self_evaluation_reminder_email(employee, manager_name, manager_email):
 
     body.append("<p>Thank you.</p>")
 
-    success = send_email(subject, "".join(body), recipient, sender_email=manager_email)
+    success = send_email(
+        subject,
+        "".join(body),
+        recipient,
+        sender_email=manager_email,
+        require_sender=True
+    )
     return success, recipient, app_url
 
 

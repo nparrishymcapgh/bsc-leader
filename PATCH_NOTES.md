@@ -1,5 +1,36 @@
 # Patch Notes
 
+## Release 1.3.5
+Date: 2026-04-20
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.4
+- Current version: 1.3.5
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Hardened self-evaluation reminder sender handling so emails use manager email as the SMTP sender context instead of silently falling back.
+
+### What Changed
+1. Updated email sending to set both:
+   - the `From` header, and
+   - the SMTP envelope sender (`from_addr`)
+   using manager sender context when provided.
+2. Added `Reply-To` to manager sender email when available.
+3. Enforced manager sender requirement for self-evaluation reminder emails so these messages fail instead of falling back to default sender.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py`
+2. Environment, sheets, SMTP, and app-url integration check:
+   - `/workspaces/bsc-leader/.venv/bin/python test_setup.py`
+
 ## Release 1.3.4
 Date: 2026-04-20
 Type: Patch
