@@ -11,6 +11,7 @@ from email.message import EmailMessage
 from urllib.parse import urlencode
 import time
 from xml.sax.saxutils import escape
+from response_submission import submit_manager_scorecard
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
@@ -2077,36 +2078,22 @@ if st.session_state.user_role == 'manager':
                                 'manager_name': st.session_state.manager_name
                             }
 
-                            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             score, no_count = calculate_score_metrics(answers)
+                            response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
+                            response_entry['responses'] = json.dumps(answers)
+                            response_entry['comments'] = manager_comment.strip()
+                            response_entry['questions_score'] = score
+                            response_entry['number_of_nos'] = no_count
 
-                            if selected_draft:
-                                draft_submit_updates = {
-                                    'responses': json.dumps(answers),
-                                    'comments': manager_comment.strip(),
-                                    'questions_score': score,
-                                    'number_of_nos': no_count,
-                                    'status': 'Pending Employee',
-                                    'employee_agree': '',
-                                    'manager_agree': '',
-                                    'executive_agree': '',
-                                    'employee_agree_ts': '',
-                                    'manager_agree_ts': '',
-                                    'executive_agree_ts': '',
-                                    'employee_token': str(uuid.uuid4()),
-                                    'manager_token': str(uuid.uuid4()),
-                                    'executive_token': str(uuid.uuid4()),
-                                    'updated_at': now
-                                }
-                                updated = update_response(selected_draft['response_id'], draft_submit_updates)
-                                if not updated:
-                                    st.error("Unable to submit draft. Please try again.")
-                                    st.stop()
-
-                                response_entry, _, _ = find_response_by_id(selected_draft['response_id'])
-                            else:
-                                response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
-                                append_response(response_entry)
+                            submitted, response_entry, submit_error = submit_manager_scorecard(
+                                response_entry,
+                                selected_draft,
+                                append_response,
+                                delete_response,
+                            )
+                            if not submitted:
+                                st.error(submit_error)
+                                st.stop()
 
                             stage_email = 'employee'
                             sent, recipient, preview = send_stage_email(response_entry, stage_email)

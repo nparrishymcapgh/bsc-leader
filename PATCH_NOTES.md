@@ -1,5 +1,39 @@
 # Patch Notes
 
+## Release 1.3.7
+Date: 2026-04-21
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.6
+- Current version: 1.3.7
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Updated manager draft submission so approval submissions no longer leave the underlying draft response behind.
+
+### What Changed
+1. Added a dedicated submission helper for manager scorecards.
+2. Changed draft submission flow to create a fresh approval response instead of converting the draft row in place.
+3. Removed the saved draft immediately after successful submission.
+4. Added rollback handling so a new approval response is deleted if draft cleanup fails.
+5. Added regression tests covering draft removal and rollback behavior.
+
+### Files Updated
+- streamlit_app.py
+- response_submission.py
+- test_response_submission.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py response_submission.py test_response_submission.py`
+2. Focused regression tests:
+   - `/workspaces/bsc-leader/.venv/bin/python -m unittest test_response_submission.py`
+3. Environment, sheets, SMTP, and app-url integration check:
+   - `/workspaces/bsc-leader/.venv/bin/python test_setup.py`
+
 ## Release 1.3.6
 Date: 2026-04-20
 Type: Patch
