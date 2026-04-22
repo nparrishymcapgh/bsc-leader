@@ -994,7 +994,13 @@ def delete_all_manager_drafts_for_employee(manager_email, employee_id):
 
 
 def scrape_duplicate_manager_drafts():
-    """Remove duplicate drafts, keeping only the latest draft per manager+employee pair."""
+    """
+    Retroactively clean up the Responses sheet:
+    1. If a non-draft submission exists for a manager+employee pair, delete ALL
+       drafts for that same pair (they are superseded).
+    2. If only drafts exist for a pair, keep the latest one and delete the rest.
+    Returns the total number of rows removed.
+    """
     try:
         spreadsheet = get_spreadsheet()
         worksheet = ensure_responses_sheet(spreadsheet)
@@ -1003,30 +1009,46 @@ def scrape_duplicate_manager_drafts():
         if df.empty or 'response_id' not in df.columns:
             return 0
 
-        drafts = df[df['status'].astype(str).str.strip().str.lower() == 'draft'].copy()
-        if drafts.empty:
-            return 0
+        sort_col = 'updated_at' if 'updated_at' in df.columns else ('created_at' if 'created_at' in df.columns else None)
+        df['_sort'] = df[sort_col].astype(str) if sort_col else ''
 
-        sort_col = 'updated_at' if 'updated_at' in drafts.columns else ('created_at' if 'created_at' in drafts.columns else None)
-        if sort_col:
-            drafts['_sort'] = drafts[sort_col].astype(str)
-        else:
-            drafts['_sort'] = ''
+        is_draft = df['status'].astype(str).str.strip().str.lower() == 'draft'
 
-        # For each manager+employee group keep the latest draft, mark the rest for deletion
-        drafts = drafts.sort_values('_sort', ascending=False)
-        seen = set()
-        to_delete_indices = []
-        for idx, row in drafts.iterrows():
+        # Build the set of manager+employee pairs that have at least one non-draft submission
+        submitted = df[~is_draft].copy()
+        submitted_pairs = set()
+        for _, row in submitted.iterrows():
             key = (str(row.get('manager_email', '')).strip().lower(), str(row.get('employee_id', '')).strip())
-            if key in seen:
-                to_delete_indices.append(idx)
-            else:
-                seen.add(key)
+            if key[0] and key[1]:
+                submitted_pairs.add(key)
+
+        to_delete_indices = []
+
+        drafts = df[is_draft].copy()
+        if not drafts.empty:
+            # Pass 1: delete all drafts for pairs that already have a submitted evaluation
+            drafts_superseded = drafts[drafts.apply(
+                lambda r: (str(r.get('manager_email', '')).strip().lower(), str(r.get('employee_id', '')).strip()) in submitted_pairs,
+                axis=1
+            )]
+            to_delete_indices.extend(drafts_superseded.index.tolist())
+
+            # Pass 2: for remaining drafts (no submitted evaluation yet), keep only the latest per pair
+            remaining_drafts = drafts[~drafts.index.isin(to_delete_indices)].copy()
+            if not remaining_drafts.empty:
+                remaining_drafts = remaining_drafts.sort_values('_sort', ascending=False)
+                seen = set()
+                for idx, row in remaining_drafts.iterrows():
+                    key = (str(row.get('manager_email', '')).strip().lower(), str(row.get('employee_id', '')).strip())
+                    if key in seen:
+                        to_delete_indices.append(idx)
+                    else:
+                        seen.add(key)
 
         if not to_delete_indices:
             return 0
 
+        # Delete in reverse order so row indices stay valid after each deletion
         row_indices = sorted([i + 2 for i in to_delete_indices], reverse=True)
         for row_index in row_indices:
             worksheet.delete_rows(row_index)
