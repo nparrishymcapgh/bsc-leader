@@ -964,6 +964,78 @@ def delete_response(response_id):
         return False
 
 
+def delete_all_manager_drafts_for_employee(manager_email, employee_id):
+    """Delete ALL draft rows for a manager+employee pair. Returns count of rows deleted."""
+    try:
+        spreadsheet = get_spreadsheet()
+        worksheet = ensure_responses_sheet(spreadsheet)
+        records = worksheet.get_all_records()
+        df = pd.DataFrame(records)
+        if df.empty or 'response_id' not in df.columns:
+            return 0
+
+        mask = (
+            (df['manager_email'].astype(str).str.strip().str.lower() == str(manager_email).strip().lower())
+            & (df['employee_id'].astype(str).str.strip() == str(employee_id).strip())
+            & (df['status'].astype(str).str.strip().str.lower() == 'draft')
+        )
+        draft_rows = df[mask]
+        if draft_rows.empty:
+            return 0
+
+        # Delete in reverse order so row indices stay valid after each deletion
+        row_indices = sorted([i + 2 for i in draft_rows.index.tolist()], reverse=True)
+        for row_index in row_indices:
+            worksheet.delete_rows(row_index)
+        return len(row_indices)
+    except Exception as e:
+        st.error(f"Unable to delete stale drafts: {e}")
+        return 0
+
+
+def scrape_duplicate_manager_drafts():
+    """Remove duplicate drafts, keeping only the latest draft per manager+employee pair."""
+    try:
+        spreadsheet = get_spreadsheet()
+        worksheet = ensure_responses_sheet(spreadsheet)
+        records = worksheet.get_all_records()
+        df = pd.DataFrame(records)
+        if df.empty or 'response_id' not in df.columns:
+            return 0
+
+        drafts = df[df['status'].astype(str).str.strip().str.lower() == 'draft'].copy()
+        if drafts.empty:
+            return 0
+
+        sort_col = 'updated_at' if 'updated_at' in drafts.columns else ('created_at' if 'created_at' in drafts.columns else None)
+        if sort_col:
+            drafts['_sort'] = drafts[sort_col].astype(str)
+        else:
+            drafts['_sort'] = ''
+
+        # For each manager+employee group keep the latest draft, mark the rest for deletion
+        drafts = drafts.sort_values('_sort', ascending=False)
+        seen = set()
+        to_delete_indices = []
+        for idx, row in drafts.iterrows():
+            key = (str(row.get('manager_email', '')).strip().lower(), str(row.get('employee_id', '')).strip())
+            if key in seen:
+                to_delete_indices.append(idx)
+            else:
+                seen.add(key)
+
+        if not to_delete_indices:
+            return 0
+
+        row_indices = sorted([i + 2 for i in to_delete_indices], reverse=True)
+        for row_index in row_indices:
+            worksheet.delete_rows(row_index)
+        return len(row_indices)
+    except Exception as e:
+        st.error(f"Unable to scrape duplicate drafts: {e}")
+        return 0
+
+
 def create_response_entry(manager, employee, answers, comment=""):
     score_answers = [int(v) for qid, v in answers.items() if v in ["1", "2", "3"]]
     questions_score = int(round(sum(score_answers) / len(score_answers) * 100)) if score_answers else 0
@@ -1745,6 +1817,9 @@ if st.session_state.user_role == 'manager':
     responses_df = load_responses()
     responses_df['employee_id'] = responses_df['employee_id'].astype(str)
 
+    # Proactively clean up any duplicate drafts accumulated across sessions
+    scrape_duplicate_manager_drafts()
+
     manager_has_responses = not responses_df[
         responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email
     ].empty if not debug_mode else True
@@ -2048,11 +2123,19 @@ if st.session_state.user_role == 'manager':
 
                         if selected_draft:
                             if update_response(selected_draft['response_id'], draft_updates):
+                                # Delete any other stale drafts for this employee (keep just the updated one)
+                                delete_all_manager_drafts_for_employee(
+                                    st.session_state.manager_email, selected_employee_id
+                                )
                                 st.success("Draft saved successfully.")
                                 st.rerun()
                             else:
                                 st.error("Unable to update draft. Please try again.")
                         else:
+                            # Remove any orphaned drafts before creating the new one
+                            delete_all_manager_drafts_for_employee(
+                                st.session_state.manager_email, selected_employee_id
+                            )
                             response_entry = create_response_entry(manager_row, selected_employee, answers, manager_comment)
                             response_entry['status'] = 'Draft'
                             response_entry['employee_agree'] = ''
@@ -2090,6 +2173,7 @@ if st.session_state.user_role == 'manager':
                                 selected_draft,
                                 append_response,
                                 delete_response,
+                                delete_all_drafts=delete_all_manager_drafts_for_employee,
                             )
                             if not submitted:
                                 st.error(submit_error)

@@ -1,6 +1,40 @@
 # Patch Notes
 
-## Release 1.3.7
+## Release 1.3.8
+Date: 2026-04-22
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.7
+- Current version: 1.3.8
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Resolved an issue where multiple manager evaluation rows could accumulate in the queue for the same employee, with stale drafts persisting after submission or subsequent draft saves.
+
+### What Changed
+1. Added `delete_all_manager_drafts_for_employee` — deletes every draft row matching a manager+employee pair in a single sheet pass (reverse-index safe).
+2. Added `scrape_duplicate_manager_drafts` — on manager page load, removes all but the latest draft per manager+employee pair, recovering from any previously accumulated duplicates.
+3. Updated `submit_manager_scorecard` to accept an optional `delete_all_drafts` callback; when provided it bulk-removes all drafts instead of only the single `selected_draft`.
+4. Updated the "Save as Draft" flow to call `delete_all_manager_drafts_for_employee` both when updating an existing draft (to clear other orphaned drafts) and when creating a new one (to prevent accumulation).
+5. Submission call-site now passes `delete_all_manager_drafts_for_employee` as `delete_all_drafts`.
+6. Added two new unit tests covering the `delete_all_drafts` code path (both with and without a `selected_draft`).
+
+### Files Updated
+- streamlit_app.py
+- response_submission.py
+- test_response_submission.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/usr/local/bin/python -m py_compile streamlit_app.py response_submission.py`
+2. Regression + new unit tests (5 total, all passing):
+   - `/usr/local/bin/python -m unittest test_response_submission -v`
+3. Environment, sheets, SMTP, and app-url integration check:
+   - `/usr/local/bin/python test_setup.py`
+
 Date: 2026-04-21
 Type: Patch
 

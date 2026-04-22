@@ -3,9 +3,20 @@ def submit_manager_scorecard(
     selected_draft,
     append_response,
     delete_response,
+    delete_all_drafts=None,
 ):
     append_response(response_entry)
 
+    manager_email = response_entry.get("manager_email", "")
+    employee_id = response_entry.get("employee_id", "")
+
+    # Prefer bulk-delete to remove ALL drafts for this manager+employee pair.
+    if delete_all_drafts is not None:
+        deleted = delete_all_drafts(manager_email, employee_id)
+        # If no drafts existed at all that's still success.
+        return True, response_entry, ""
+
+    # Fallback: delete only the explicitly selected draft (legacy path).
     if not selected_draft:
         return True, response_entry, ""
 
