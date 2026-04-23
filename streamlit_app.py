@@ -964,8 +964,9 @@ def delete_response(response_id):
         return False
 
 
-def delete_all_manager_drafts_for_employee(manager_email, employee_id):
-    """Delete ALL draft rows for a manager+employee pair. Returns count of rows deleted."""
+def delete_all_manager_drafts_for_employee(manager_email, employee_id, exclude_response_id=None):
+    """Delete ALL draft rows for a manager+employee pair. Returns count of rows deleted.
+    Pass exclude_response_id to protect one row from deletion (e.g. a draft just updated)."""
     try:
         spreadsheet = get_spreadsheet()
         worksheet = ensure_responses_sheet(spreadsheet)
@@ -979,6 +980,8 @@ def delete_all_manager_drafts_for_employee(manager_email, employee_id):
             & (df['employee_id'].astype(str).str.strip() == str(employee_id).strip())
             & (df['status'].astype(str).str.strip().str.lower() == 'draft')
         )
+        if exclude_response_id:
+            mask = mask & (df['response_id'].astype(str).str.strip() != str(exclude_response_id).strip())
         draft_rows = df[mask]
         if draft_rows.empty:
             return 0
@@ -2147,7 +2150,8 @@ if st.session_state.user_role == 'manager':
                             if update_response(selected_draft['response_id'], draft_updates):
                                 # Delete any other stale drafts for this employee (keep just the updated one)
                                 delete_all_manager_drafts_for_employee(
-                                    st.session_state.manager_email, selected_employee_id
+                                    st.session_state.manager_email, selected_employee_id,
+                                    exclude_response_id=selected_draft['response_id']
                                 )
                                 st.success("Draft saved successfully.")
                                 st.rerun()

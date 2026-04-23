@@ -1,5 +1,35 @@
 # Patch Notes
 
+## Release 1.3.9
+Date: 2026-04-23
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.8
+- Current version: 1.3.9
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Fixed a bug where saving an existing draft would delete the draft that was just updated, because `delete_all_manager_drafts_for_employee` did not exclude the just-saved row from its sweep. The function now accepts an `exclude_response_id` parameter to protect one row from deletion, ensuring the most recent draft is always preserved.
+
+### What Changed
+1. Added `exclude_response_id` optional parameter to `delete_all_manager_drafts_for_employee` — when supplied, the matching row is excluded from the bulk-delete sweep.
+2. Updated the "Save as Draft (update)" path to pass `exclude_response_id=selected_draft['response_id']`, preventing the just-saved draft from being immediately deleted.
+3. All other call-sites (new draft creation, submission) retain existing behaviour (no exclusion needed).
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/usr/local/bin/python -m py_compile streamlit_app.py response_submission.py`
+2. Regression unit tests (5 total, all passing):
+   - `/usr/local/bin/python -m unittest test_response_submission -v`
+
+---
+
 ## Release 1.3.8
 Date: 2026-04-22
 Type: Patch
