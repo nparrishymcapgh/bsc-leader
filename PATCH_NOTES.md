@@ -1,5 +1,39 @@
 # Patch Notes
 
+## Release 1.3.12
+Date: 2026-04-30
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.11
+- Current version: 1.3.12
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Added per-scorecard resend controls so users can resend the latest pending approval email directly from each employee's scorecard details card.
+
+### What Changed
+1. Added a pending-status resolver that maps scorecard status to the correct email stage recipient (employee, manager, or executive).
+2. Added a reusable resend helper that resends the stage email tied to the current pending status.
+3. Added a `Resend ... Email` button in manager `Scorecard Details` for each employee when the scorecard is in a pending state.
+4. Added the same per-scorecard resend button in executive `Scorecard Details` for branch-scoped employee scorecards.
+5. Added user-facing validation messages when resend is unavailable, delivery fails, or recipient email is missing.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py response_submission.py test_response_submission.py`
+2. Regression unit tests (5 total, all passing):
+   - `/workspaces/bsc-leader/.venv/bin/python -m unittest test_response_submission -v`
+3. Environment, sheets, SMTP, and app-url integration check:
+   - `/workspaces/bsc-leader/.venv/bin/python test_setup.py`
+4. Additional repeated debug verification pass:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py && /workspaces/bsc-leader/.venv/bin/python -m unittest test_response_submission -v`
+
 ## Release 1.3.11
 Date: 2026-04-30
 Type: Patch

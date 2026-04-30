@@ -1457,6 +1457,32 @@ def send_stage_email(response, stage):
         return False, recipient, body
 
 
+def get_pending_stage_from_status(status):
+    status_key = str(status).strip().lower()
+    stage_map = {
+        'pending employee': 'employee',
+        'pending manager': 'manager',
+        'pending executive': 'executive'
+    }
+    return stage_map.get(status_key)
+
+
+def resend_pending_stage_email(response):
+    stage = get_pending_stage_from_status(response.get('status', ''))
+    if not stage:
+        return False, '', 'Resend is only available while a scorecard is pending approval.'
+
+    sent, recipient, _ = send_stage_email(response, stage)
+    if sent:
+        return True, recipient, ''
+
+    if recipient and '@' in str(recipient):
+        return False, recipient, 'Email delivery failed. SMTP may not be configured.'
+
+    role_name = stage.title()
+    return False, recipient, f"No valid {role_name} recipient email is configured for this scorecard."
+
+
 def send_rejection_notice_to_manager(response, rejected_by_role, rejected_by_name, rejection_comment):
     """Notify manager that the review was rejected and removed for resubmission."""
     recipient = response.get('manager_email', '')
@@ -2339,6 +2365,16 @@ if st.session_state.user_role == 'manager':
                                 st.write(f"Employee: {row.get('employee_email', '')}")
                                 st.write(f"Manager: {row.get('manager_email', '')}")
 
+                            pending_stage = get_pending_stage_from_status(row.get('status', ''))
+                            if pending_stage:
+                                resend_button_label = f"Resend {pending_stage.title()} Email"
+                                if st.button(resend_button_label, key=f"manager_resend_stage_{row.get('response_id', '')}"):
+                                    sent, recipient, error_msg = resend_pending_stage_email(row)
+                                    if sent:
+                                        st.success(f"Resent pending-stage email to {recipient}.")
+                                    else:
+                                        st.warning(error_msg)
+
                             if str(row.get('status', '')).strip() == 'Approved':
                                 employee_self_eval = get_latest_employee_response_for_email(
                                     employee_responses_for_pdf,
@@ -2471,6 +2507,16 @@ elif st.session_state.user_role == 'executive':
                 st.write(f"Employee approval: {row.get('employee_agree', '')} at {row.get('employee_agree_ts', '')}")
                 st.write(f"Manager approval: {row.get('manager_agree', '')} at {row.get('manager_agree_ts', '')}")
                 st.write(f"Executive approval: {row.get('executive_agree', '')} at {row.get('executive_agree_ts', '')}")
+
+                pending_stage = get_pending_stage_from_status(row.get('status', ''))
+                if pending_stage:
+                    resend_button_label = f"Resend {pending_stage.title()} Email"
+                    if st.button(resend_button_label, key=f"executive_resend_stage_{row.get('response_id', '')}"):
+                        sent, recipient, error_msg = resend_pending_stage_email(row)
+                        if sent:
+                            st.success(f"Resent pending-stage email to {recipient}.")
+                        else:
+                            st.warning(error_msg)
 
                 if str(row.get('status', '')).strip() == 'Approved':
                     employee_self_eval = get_latest_employee_response_for_email(
