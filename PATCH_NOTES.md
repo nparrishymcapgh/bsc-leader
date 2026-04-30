@@ -1,5 +1,34 @@
 # Patch Notes
 
+## Release 1.3.11
+Date: 2026-04-30
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.10
+- Current version: 1.3.11
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Added an admin-only, on-demand duplicate draft cleanup control so stale drafts can still be removed without running expensive sheet scans on every manager page load.
+
+### What Changed
+1. Added a new admin section in the manager dashboard: `Draft Cleanup Administration`.
+2. Added a confirmation-gated `Cleanup Duplicate Drafts` action for the password admin account.
+3. Wired the cleanup action to `scrape_duplicate_manager_drafts(responses_df=responses_df)` so it reuses in-memory data and minimizes extra read calls.
+4. Added post-cleanup cache clear + rerun when rows are removed so the UI reflects the cleaned state immediately.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py response_submission.py test_response_submission.py`
+2. Regression unit tests (5 total, all passing):
+   - `/workspaces/bsc-leader/.venv/bin/python -m unittest test_response_submission -v`
+
 ## Release 1.3.10
 Date: 2026-04-30
 Type: Patch

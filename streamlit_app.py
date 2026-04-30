@@ -1881,6 +1881,23 @@ if st.session_state.user_role == 'manager':
                 st.warning(f"Sent {sent_count} manager password emails. Failed: {', '.join(failed_emails)}")
             else:
                 st.success(f"Sent manager password emails to {sent_count} managers.")
+
+        st.markdown("### Draft Cleanup Administration")
+        st.caption("Run this only when needed to remove stale duplicate drafts in the Responses sheet.")
+        if render_mass_email_confirmation(
+            "cleanup_duplicate_manager_drafts",
+            "Cleanup Duplicate Drafts",
+            "Are you sure you want to run duplicate draft cleanup now?"
+        ):
+            with st.spinner("Cleaning duplicate drafts..."):
+                removed_count = scrape_duplicate_manager_drafts(responses_df=responses_df)
+
+            if removed_count > 0:
+                st.success(f"Removed {removed_count} duplicate draft rows.")
+                clear_data_caches()
+                st.rerun()
+            else:
+                st.info("No duplicate drafts found.")
         st.divider()
 
     tab_new, tab_status, tab_self_eval = st.tabs(["Submit Scorecard", "Scorecard Status", "Employee Self-Evaluations"])
