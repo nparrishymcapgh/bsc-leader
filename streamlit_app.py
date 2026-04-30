@@ -972,7 +972,8 @@ def delete_all_manager_drafts_for_employee(manager_email, employee_id, exclude_r
         worksheet = ensure_responses_sheet(spreadsheet)
         records = worksheet.get_all_records()
         df = pd.DataFrame(records)
-        if df.empty or 'response_id' not in df.columns:
+        required_columns = {'response_id', 'status', 'manager_email', 'employee_id'}
+        if df.empty or not required_columns.issubset(set(df.columns)):
             return 0
 
         mask = (
@@ -996,44 +997,49 @@ def delete_all_manager_drafts_for_employee(manager_email, employee_id, exclude_r
         return 0
 
 
-def scrape_duplicate_manager_drafts():
+def scrape_duplicate_manager_drafts(responses_df=None):
     """
-    Retroactively clean up the Responses sheet:
+    Retroactively clean up duplicate draft rows in the Responses sheet:
     1. If a non-draft submission exists for a manager+employee pair, delete ALL
        drafts for that same pair (they are superseded).
     2. If only drafts exist for a pair, keep the latest one and delete the rest.
+
+    Provide responses_df to reuse already-loaded data and avoid an extra read.
     Returns the total number of rows removed.
     """
     try:
-        spreadsheet = get_spreadsheet()
-        worksheet = ensure_responses_sheet(spreadsheet)
-        records = worksheet.get_all_records()
-        df = pd.DataFrame(records)
-        if df.empty or 'response_id' not in df.columns:
+        if responses_df is None:
+            spreadsheet = get_spreadsheet()
+            worksheet = ensure_responses_sheet(spreadsheet)
+            records = worksheet.get_all_records()
+            df = pd.DataFrame(records)
+        else:
+            df = pd.DataFrame(responses_df).copy()
+
+        required_columns = {'response_id', 'status', 'manager_email', 'employee_id'}
+        if df.empty or not required_columns.issubset(set(df.columns)):
             return 0
 
         sort_col = 'updated_at' if 'updated_at' in df.columns else ('created_at' if 'created_at' in df.columns else None)
         df['_sort'] = df[sort_col].astype(str) if sort_col else ''
+        df['_manager_key'] = df['manager_email'].astype(str).str.strip().str.lower()
+        df['_employee_key'] = df['employee_id'].astype(str).str.strip()
 
         is_draft = df['status'].astype(str).str.strip().str.lower() == 'draft'
 
-        # Build the set of manager+employee pairs that have at least one non-draft submission
-        submitted = df[~is_draft].copy()
-        submitted_pairs = set()
-        for _, row in submitted.iterrows():
-            key = (str(row.get('manager_email', '')).strip().lower(), str(row.get('employee_id', '')).strip())
-            if key[0] and key[1]:
-                submitted_pairs.add(key)
+        submitted_pairs = {
+            (row['_manager_key'], row['_employee_key'])
+            for _, row in df[~is_draft].iterrows()
+            if row['_manager_key'] and row['_employee_key']
+        }
 
         to_delete_indices = []
 
         drafts = df[is_draft].copy()
         if not drafts.empty:
             # Pass 1: delete all drafts for pairs that already have a submitted evaluation
-            drafts_superseded = drafts[drafts.apply(
-                lambda r: (str(r.get('manager_email', '')).strip().lower(), str(r.get('employee_id', '')).strip()) in submitted_pairs,
-                axis=1
-            )]
+            draft_pairs = list(zip(drafts['_manager_key'], drafts['_employee_key']))
+            drafts_superseded = drafts[[pair in submitted_pairs for pair in draft_pairs]]
             to_delete_indices.extend(drafts_superseded.index.tolist())
 
             # Pass 2: for remaining drafts (no submitted evaluation yet), keep only the latest per pair
@@ -1042,7 +1048,7 @@ def scrape_duplicate_manager_drafts():
                 remaining_drafts = remaining_drafts.sort_values('_sort', ascending=False)
                 seen = set()
                 for idx, row in remaining_drafts.iterrows():
-                    key = (str(row.get('manager_email', '')).strip().lower(), str(row.get('employee_id', '')).strip())
+                    key = (row['_manager_key'], row['_employee_key'])
                     if key in seen:
                         to_delete_indices.append(idx)
                     else:
@@ -1050,6 +1056,10 @@ def scrape_duplicate_manager_drafts():
 
         if not to_delete_indices:
             return 0
+
+        if responses_df is not None:
+            spreadsheet = get_spreadsheet()
+            worksheet = ensure_responses_sheet(spreadsheet)
 
         # Delete in reverse order so row indices stay valid after each deletion
         row_indices = sorted([i + 2 for i in to_delete_indices], reverse=True)
@@ -1841,9 +1851,6 @@ if st.session_state.user_role == 'manager':
 
     responses_df = load_responses()
     responses_df['employee_id'] = responses_df['employee_id'].astype(str)
-
-    # Proactively clean up any duplicate drafts accumulated across sessions
-    scrape_duplicate_manager_drafts()
 
     manager_has_responses = not responses_df[
         responses_df['manager_email'].astype(str).str.lower() == st.session_state.manager_email

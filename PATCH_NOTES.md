@@ -1,5 +1,37 @@
 # Patch Notes
 
+## Release 1.3.10
+Date: 2026-04-30
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.9
+- Current version: 1.3.10
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Reduced Google Sheets read-pressure that was triggering frequent `429` quota errors by removing automatic duplicate-draft full-sheet scans from every manager dashboard load.
+
+### What Changed
+1. Removed the automatic call to duplicate-draft scraping in the manager dashboard render path, which previously performed an additional full `Responses` sheet read on every manager page load.
+2. Simplified `scrape_duplicate_manager_drafts` so it can operate from an already-loaded DataFrame (`responses_df`) instead of always issuing a new `get_all_records` call.
+3. Simplified superseded-draft detection logic by precomputing normalized manager/employee keys and avoiding row-wise `apply` usage.
+4. Added required-column guards in duplicate scraping so cleanup exits safely when expected columns are missing.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Reproduced the reported Sheets quota error with repeated read-only calls:
+   - `/workspaces/bsc-leader/.venv/bin/python - <<'PY' ... ws.get_all_records() ... PY`
+   - Result: `APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user'` at read 64.
+2. Python syntax compile check:
+   - `/workspaces/bsc-leader/.venv/bin/python -m py_compile streamlit_app.py response_submission.py test_response_submission.py`
+3. Regression unit tests (5 total, all passing):
+   - `/workspaces/bsc-leader/.venv/bin/python -m unittest test_response_submission -v`
+
 ## Release 1.3.9
 Date: 2026-04-23
 Type: Patch
