@@ -96,7 +96,7 @@ MANAGERS_TAB = "Managers"
 EXECUTIVES_TAB = "Executives"
 PASSWORD_ADMIN_EMAIL = "nparrish@ymcapgh.org"
 EXECUTIVE_ADMIN_EMAIL = "nparrish@ymcapgh.org"
-DEFAULT_DATA_SYNC_MINUTES = 5
+DEFAULT_DATA_SYNC_MINUTES = 60
 
 MANAGER_RESPONSE_COLUMNS = [
     "response_id", "created_at", "updated_at", "manager_email", "manager_name",
@@ -123,7 +123,7 @@ EMPLOYEE_RESPONSE_COLUMNS = [
 # from_email = "no-reply@example.com"
 # [app]
 # url = "https://your-app-url.streamlit.app"
-# data_sync_minutes = 5
+# data_sync_minutes = 60
 
 # ============================================================================
 # GOOGLE SHEETS UTILITIES
@@ -154,7 +154,7 @@ def get_spreadsheet():
         st.info("Please check your service account configuration and Google Sheet permissions.")
         st.stop()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_sheet(tab_name):
     spreadsheet = get_spreadsheet()
     try:
@@ -222,7 +222,7 @@ def sync_session_data():
     st.session_state.data_loaded = True
     st.session_state.last_data_sync_ts = time.time()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_responses():
     """Load responses from the Responses sheet."""
     try:
@@ -259,7 +259,7 @@ def ensure_employee_responses_sheet(spreadsheet):
     return ensure_sheet_headers(worksheet, EMPLOYEE_RESPONSE_COLUMNS)
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_employee_responses():
     try:
         spreadsheet = get_spreadsheet()
@@ -1853,11 +1853,17 @@ st.sidebar.markdown(f"**Signed in as:** {sidebar_identity}")
 st.sidebar.caption(f"Role: {st.session_state.user_role.title()}")
 st.sidebar.caption(f"Auto-sync: every {sync_interval_minutes} minute(s)")
 
-if st.sidebar.button("Sync Data from Google Sheets Now"):
-    clear_data_caches()
-    st.session_state.data_loaded = False
-    st.session_state.sync_notice = "Data synced from Google Sheets."
-    st.rerun()
+_current_user_email = (
+    st.session_state.get('manager_email') or
+    st.session_state.get('executive_email') or
+    st.session_state.get('employee_email') or ''
+)
+if _current_user_email.lower() == PASSWORD_ADMIN_EMAIL.lower():
+    if st.sidebar.button("Sync Data from Google Sheets Now"):
+        clear_data_caches()
+        st.session_state.data_loaded = False
+        st.session_state.sync_notice = "Data synced from Google Sheets."
+        st.rerun()
 
 if st.session_state.get('sync_notice'):
     st.sidebar.success(st.session_state.sync_notice)

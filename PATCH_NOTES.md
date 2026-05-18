@@ -1,5 +1,34 @@
 # Patch Notes
 
+## Release 1.3.13
+Date: 2026-05-18
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.12
+- Current version: 1.3.13
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Changed the Google Sheets auto-sync interval from 5 minutes to 60 minutes, and restricted the manual "Sync Data from Google Sheets Now" button to the admin account only (`nparrish@ymcapgh.org`).
+
+### What Changed
+1. `DEFAULT_DATA_SYNC_MINUTES` constant changed from `5` to `60`.
+2. All `@st.cache_data(ttl=300)` decorators updated to `ttl=3600` (`load_sheet`, `load_responses`, `load_employee_responses`).
+3. Example secrets comment updated to reflect the new default (`data_sync_minutes = 60`).
+4. Manual "Sync Data from Google Sheets Now" sidebar button is now only rendered when the currently logged-in user's email matches `nparrish@ymcapgh.org`.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `/usr/local/bin/python -m py_compile streamlit_app.py`
+
+---
+
 ## Release 1.3.12
 Date: 2026-04-30
 Type: Patch
