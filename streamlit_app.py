@@ -7,6 +7,7 @@ import json
 import uuid
 import smtplib
 import io
+import zipfile
 from email.message import EmailMessage
 from urllib.parse import urlencode
 import time
@@ -709,6 +710,8 @@ def generate_scorecard_pdf(response, manager_questions_df, employee_questions_df
     story.append(Paragraph(f"<b>Manager:</b> {manager_name} ({manager_email})", styles['Normal']))
     story.append(Paragraph(f"<b>Branch:</b> {escape(str(response.get('branch', '')))} &nbsp; <b>Dept:</b> {escape(str(response.get('dept', '')))}", styles['Normal']))
     story.append(Paragraph(f"<b>Status:</b> {status}", styles['Normal']))
+    if str(response.get('status', '')).strip() != 'Approved':
+        story.append(Paragraph("<b>NOTICE:</b> This review is not fully approved. The approval process is incomplete.", styles['Normal']))
     story.append(Spacer(1, 8))
 
     story.append(Paragraph("Balanced Scorecard Responses", styles['Heading2']))
@@ -774,6 +777,30 @@ def generate_scorecard_pdf(response, manager_questions_df, employee_questions_df
     )
     doc.build(story)
     return buffer.getvalue()
+
+
+def generate_scorecard_pdf_archive(responses_df, manager_questions_df, employee_questions_df, employee_responses_df):
+    archive_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(archive_buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+        for _, response in responses_df.iterrows():
+            employee_self_eval = get_latest_employee_response_for_email(
+                employee_responses_df,
+                str(response.get('employee_email', '')).strip().lower()
+            )
+            pdf_bytes = generate_scorecard_pdf(
+                response,
+                manager_questions_df,
+                employee_questions_df,
+                employee_self_eval
+            )
+            file_name = (
+                f"scorecard_{str(response.get('employee_id', 'employee')).strip()}_"
+                f"{str(response.get('response_id', 'response')).strip()}.pdf"
+            )
+            archive.writestr(file_name, pdf_bytes)
+
+    return archive_buffer.getvalue()
 
 # ============================================================================
 # RESPONSE OPERATIONS
@@ -2454,19 +2481,36 @@ elif st.session_state.user_role == 'executive':
     employees_df = st.session_state.employees_df.copy()
 
     executive_email = st.session_state.get('executive_email', '').strip().lower()
+    is_executive_admin = executive_email == EXECUTIVE_ADMIN_EMAIL.lower()
 
-    executive_branches = set(
+    assigned_branches = set(
         employees_df[
             employees_df['executive_email'].astype(str).str.strip().str.lower() == executive_email
         ]['branch'].astype(str).str.strip()
     )
-    executive_branches = {branch for branch in executive_branches if branch}
+    assigned_branches = {branch for branch in assigned_branches if branch}
+
+    if is_executive_admin:
+        available_branches = set(employees_df['branch'].astype(str).str.strip())
+        available_branches.update(responses_df['branch'].astype(str).str.strip())
+        available_branches = sorted(branch for branch in available_branches if branch)
+        if available_branches:
+            selected_branch = st.selectbox(
+                "Branch to view:",
+                available_branches,
+                key="executive_admin_branch"
+            )
+            executive_branches = {selected_branch}
+        else:
+            executive_branches = set()
+    else:
+        executive_branches = assigned_branches
 
     branch_responses = responses_df[
         responses_df['branch'].astype(str).str.strip().isin(executive_branches)
     ].copy() if executive_branches else pd.DataFrame(columns=responses_df.columns)
 
-    if branch_responses.empty:
+    if branch_responses.empty and not is_executive_admin:
         branch_responses = responses_df[
             responses_df['executive_email'].astype(str).str.strip().str.lower() == executive_email
         ].copy()
@@ -2482,7 +2526,9 @@ elif st.session_state.user_role == 'executive':
     k3.metric("Pending", pending_count)
     k4.metric("Rejected", rejected_count)
 
-    if executive_branches:
+    if is_executive_admin and executive_branches:
+        st.caption(f"Administrator branch scope: {', '.join(sorted(executive_branches))}")
+    elif executive_branches:
         st.caption(f"Branch scope: {', '.join(sorted(executive_branches))}")
     else:
         st.caption("No branch assignment found. Showing scorecards tied directly to your executive email.")
@@ -2504,6 +2550,38 @@ elif st.session_state.user_role == 'executive':
         manager_questions_for_pdf = load_manager_questions()
         employee_questions_for_pdf = load_employee_questions()
         employee_responses_for_pdf = load_employee_responses()
+
+        if is_executive_admin:
+            st.markdown("### Export Branch Reviews")
+            export_choice = st.selectbox(
+                "Reviews to export:",
+                ["Approved reviews only", "All reviews (approved or not)"],
+                key="executive_admin_export_choice"
+            )
+            export_responses = branch_responses
+            if export_choice == "Approved reviews only":
+                export_responses = branch_responses[
+                    branch_responses['status'].astype(str).str.strip() == 'Approved'
+                ]
+
+            if export_responses.empty:
+                st.info("No reviews match the selected export option.")
+            else:
+                export_scope = "approved" if export_choice == "Approved reviews only" else "all"
+                export_branch = str(next(iter(executive_branches), "branch")).strip()
+                archive_bytes = generate_scorecard_pdf_archive(
+                    export_responses,
+                    manager_questions_for_pdf,
+                    employee_questions_for_pdf,
+                    employee_responses_for_pdf
+                )
+                st.download_button(
+                    "Export Branch Reviews",
+                    data=archive_bytes,
+                    file_name=f"{export_branch}_{export_scope}_reviews.zip",
+                    mime="application/zip",
+                    key=f"executive_branch_export_{export_scope}_{export_branch}"
+                )
 
         st.markdown("### Scorecard Details")
         for _, row in branch_responses.iterrows():

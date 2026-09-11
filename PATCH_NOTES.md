@@ -1,5 +1,38 @@
 # Patch Notes
 
+## Release 1.3.15
+Date: 2026-09-11
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.14
+- Current version: 1.3.15
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Expanded executive administration permissions for `nparrish@ymcapgh.org` with branch selection and branch-wide review PDF exports.
+
+### What Changed
+1. The executive admin can select any available branch to view its scorecards and branch status.
+2. The executive admin can export all approved reviews for the selected branch as a ZIP of PDFs.
+3. The executive admin can export all reviews for the selected branch, including pending or rejected reviews.
+4. PDFs for reviews that are not fully approved now include an explicit incomplete-approval notice.
+5. Regular executives continue to see only their assigned branch scope and do not receive the administration export controls.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `python3 -m py_compile streamlit_app.py`
+2. Regression unit tests (5 total, all passing):
+   - `python3 -m unittest test_response_submission.py`
+3. Workspace diagnostics check reported no errors for `streamlit_app.py`.
+4. Git whitespace check:
+   - `git diff --check`
+
 ## Release 1.3.14
 Date: 2026-09-11
 Type: Patch
