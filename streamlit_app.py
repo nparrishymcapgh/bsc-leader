@@ -7,6 +7,7 @@ import json
 import uuid
 import smtplib
 import io
+import re
 import zipfile
 from email.message import EmailMessage
 from urllib.parse import urlencode
@@ -779,6 +780,14 @@ def generate_scorecard_pdf(response, manager_questions_df, employee_questions_df
     return buffer.getvalue()
 
 
+def scorecard_pdf_filename(response):
+    employee_name = str(response.get('employee_name', 'employee')).strip() or 'employee'
+    approval_status = str(response.get('status', 'Unknown')).strip() or 'Unknown'
+    safe_name = re.sub(r'[^A-Za-z0-9._ -]+', '', employee_name).strip() or 'employee'
+    safe_status = re.sub(r'[^A-Za-z0-9._ -]+', '', approval_status).strip() or 'Unknown'
+    return f"{safe_name}_Scorecard_{safe_status}.pdf"
+
+
 def generate_scorecard_pdf_archive(responses_df, manager_questions_df, employee_questions_df, employee_responses_df):
     archive_buffer = io.BytesIO()
 
@@ -794,11 +803,7 @@ def generate_scorecard_pdf_archive(responses_df, manager_questions_df, employee_
                 employee_questions_df,
                 employee_self_eval
             )
-            file_name = (
-                f"scorecard_{str(response.get('employee_id', 'employee')).strip()}_"
-                f"{str(response.get('response_id', 'response')).strip()}.pdf"
-            )
-            archive.writestr(file_name, pdf_bytes)
+            archive.writestr(scorecard_pdf_filename(response), pdf_bytes)
 
     return archive_buffer.getvalue()
 
@@ -2420,7 +2425,7 @@ if st.session_state.user_role == 'manager':
                                     employee_questions_for_pdf,
                                     employee_self_eval
                                 )
-                                file_name = f"scorecard_{str(row.get('employee_id', 'employee')).strip()}_{str(row.get('response_id', 'response')).strip()}.pdf"
+                                file_name = scorecard_pdf_filename(row)
                                 st.download_button(
                                     "Download Approved PDF",
                                     data=pdf_bytes,
@@ -2614,7 +2619,7 @@ elif st.session_state.user_role == 'executive':
                         employee_questions_for_pdf,
                         employee_self_eval
                     )
-                    file_name = f"scorecard_{str(row.get('employee_id', 'employee')).strip()}_{str(row.get('response_id', 'response')).strip()}.pdf"
+                    file_name = scorecard_pdf_filename(row)
                     st.download_button(
                         "Download Approved PDF",
                         data=pdf_bytes,

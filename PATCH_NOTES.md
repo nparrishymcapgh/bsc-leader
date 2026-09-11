@@ -1,5 +1,38 @@
 # Patch Notes
 
+## Release 1.3.16
+Date: 2026-09-11
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.15
+- Current version: 1.3.16
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Fixed executive branch exports so the all-reviews option includes unapproved scorecards and standardized exported PDF filenames.
+
+### What Changed
+1. Unapproved scorecards are generated as PDFs only for the executive branch export function.
+2. The approved-only export continues to include only scorecards with `Approved` status.
+3. Every exported scorecard PDF now follows the `employee name_Scorecard_approval status.pdf` naming convention.
+4. Unapproved PDFs retain an explicit incomplete-approval notice inside the document.
+5. Manager and individual executive scorecard downloads remain limited to fully approved reviews.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `python3 -m py_compile streamlit_app.py`
+2. Regression unit tests (5 total, all passing):
+   - `python3 -m unittest test_response_submission.py`
+3. Workspace diagnostics check reported no errors for `streamlit_app.py`.
+4. Git whitespace check:
+   - `git diff --check`
+
 ## Release 1.3.15
 Date: 2026-09-11
 Type: Patch
