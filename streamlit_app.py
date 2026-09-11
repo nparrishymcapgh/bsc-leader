@@ -1745,10 +1745,36 @@ if not st.session_state.data_loaded:
         sync_session_data()
 
 if not st.session_state.logged_in:
-    manager_col, employee_col = st.columns(2)
+    st.subheader("Login")
+    login_role = st.selectbox(
+        "Log in as:",
+        ["Employee", "Manager", "Executive"],
+        key="login_role"
+    )
 
-    with manager_col:
-        st.subheader("Manager Login")
+    if login_role == "Employee":
+        employee_login_email = st.text_input(
+            "Enter your employee email:",
+            placeholder="employee@example.com",
+            key='employee_login_email'
+        ).strip().lower()
+        if st.button("Login as Employee", type='primary'):
+            employee_emails = st.session_state.employees_df['email'].astype(str).str.lower().values
+            if employee_login_email and employee_login_email in employee_emails:
+                employee_row = st.session_state.employees_df[
+                    st.session_state.employees_df['email'].astype(str).str.lower() == employee_login_email
+                ].iloc[0]
+                st.session_state.logged_in = True
+                st.session_state.user_role = 'employee'
+                st.session_state.employee_email = employee_login_email
+                st.session_state.employee_name = employee_row.get('name', employee_login_email)
+                st.session_state.manager_email = ''
+                st.session_state.manager_name = ''
+                st.rerun()
+            else:
+                st.error("Employee email not found. Please enter an email listed in the Employees sheet.")
+
+    elif login_role == "Manager":
         manager_login_email = st.text_input(
             "Enter your manager email:",
             placeholder="manager@example.com",
@@ -1781,64 +1807,39 @@ if not st.session_state.logged_in:
                 else:
                     st.error(manager_error)
 
-    with employee_col:
-        st.subheader("Employee Login")
-        employee_login_email = st.text_input(
-            "Enter your employee email:",
-            placeholder="employee@example.com",
-            key='employee_login_email'
+    else:
+        executive_login_email = st.text_input(
+            "Enter your executive email:",
+            placeholder="executive@example.com",
+            key='executive_login_email'
         ).strip().lower()
-        if st.button("Login as Employee", type='primary'):
-            employee_emails = st.session_state.employees_df['email'].astype(str).str.lower().values
-            if employee_login_email and employee_login_email in employee_emails:
-                employee_row = st.session_state.employees_df[
-                    st.session_state.employees_df['email'].astype(str).str.lower() == employee_login_email
-                ].iloc[0]
-                st.session_state.logged_in = True
-                st.session_state.user_role = 'employee'
-                st.session_state.employee_email = employee_login_email
-                st.session_state.employee_name = employee_row.get('name', employee_login_email)
-                st.session_state.manager_email = ''
-                st.session_state.manager_name = ''
-                st.rerun()
+        executive_login_password = st.text_input(
+            "Enter your executive password:",
+            type="password",
+            key='executive_login_password'
+        )
+        if st.button("Login as Executive", type='primary'):
+            if not executive_login_email:
+                st.error("Please enter your executive email.")
+            elif not executive_login_password:
+                st.error("Please enter your executive password.")
             else:
-                st.error("Employee email not found. Please enter an email listed in the Employees sheet.")
-
-    st.divider()
-    st.subheader("Executive Login")
-    executive_login_email = st.text_input(
-        "Enter your executive email:",
-        placeholder="executive@example.com",
-        key='executive_login_email'
-    ).strip().lower()
-    executive_login_password = st.text_input(
-        "Enter your executive password:",
-        type="password",
-        key='executive_login_password'
-    )
-
-    if st.button("Login as Executive", type='primary'):
-        if not executive_login_email:
-            st.error("Please enter your executive email.")
-        elif not executive_login_password:
-            st.error("Please enter your executive password.")
-        else:
-            is_valid_executive, executive_email, executive_error = validate_executive_credentials(
-                st.session_state.get('executives_df', pd.DataFrame()),
-                executive_login_email,
-                executive_login_password
-            )
-            if is_valid_executive:
-                st.session_state.logged_in = True
-                st.session_state.user_role = 'executive'
-                st.session_state.executive_email = executive_email
-                st.session_state.manager_email = ''
-                st.session_state.manager_name = ''
-                st.session_state.employee_email = ''
-                st.session_state.employee_name = ''
-                st.rerun()
-            else:
-                st.error(executive_error)
+                is_valid_executive, executive_email, executive_error = validate_executive_credentials(
+                    st.session_state.get('executives_df', pd.DataFrame()),
+                    executive_login_email,
+                    executive_login_password
+                )
+                if is_valid_executive:
+                    st.session_state.logged_in = True
+                    st.session_state.user_role = 'executive'
+                    st.session_state.executive_email = executive_email
+                    st.session_state.manager_email = ''
+                    st.session_state.manager_name = ''
+                    st.session_state.employee_email = ''
+                    st.session_state.employee_name = ''
+                    st.rerun()
+                else:
+                    st.error(executive_error)
 
     st.stop()
 

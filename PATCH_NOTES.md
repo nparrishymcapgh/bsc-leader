@@ -1,5 +1,37 @@
 # Patch Notes
 
+## Release 1.3.14
+Date: 2026-09-11
+Type: Patch
+
+### Version Control
+- Previous version: 1.3.13
+- Current version: 1.3.14
+- Repository: nparrishymcapgh/bsc-leader
+- Branch: main
+
+### Summary
+Changed the login screen to use a role selector so users choose Employee, Manager, or Executive before entering their credentials.
+
+### What Changed
+1. Replaced the three simultaneous login sections with one `Log in as` selector.
+2. Employee login displays only the employee email field.
+3. Manager and Executive login display the appropriate email and password fields.
+4. Preserved the existing role-specific authentication and session setup behavior.
+
+### Files Updated
+- streamlit_app.py
+- PATCH_NOTES.md
+
+### Testing and Debugging Completed
+1. Python syntax compile check:
+   - `python3 -m py_compile streamlit_app.py`
+2. Regression unit tests (5 total, all passing):
+   - `python3 -m unittest test_response_submission.py`
+3. Workspace diagnostics check reported no errors for `streamlit_app.py`.
+4. Git whitespace check:
+   - `git diff --check`
+
 ## Release 1.3.13
 Date: 2026-05-18
 Type: Patch
